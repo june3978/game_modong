@@ -32,7 +32,8 @@ const MAP_H = 96;
 const WORLD_W = MAP_W * TILE;
 const WORLD_H = MAP_H * TILE;
 
-const ITEMS = [['wood', '🪵'], ['flower', '🌸'], ['berry', '🫐'], ['shell', '🐚'], ['fish', '🐟'], ['bug', '🦋'], ['seed', '🌱'], ['furniture', '🪑']];
+// TODO(v2.3-visual): explicit inventory/resource icons for immediate readability
+const ITEMS = [['wood', '🪵'], ['flower', '🌸'], ['berry', '🫐'], ['shell', '🐚'], ['fish', '🐟'], ['bug', '🐞'], ['seed', '🌱'], ['furniture', '🪑']];
 const SEASONS = ['봄', '여름', '가을', '겨울'];
 const EVENTS = ['낚시 대잔치', '꽃 축제', '시장 오픈', '고요한 밤'];
 
@@ -244,6 +245,11 @@ function tryNpcBarter(npc) {
   addLog(`${npc.name}와 물물교환: ${offer.give} -${offer.giveAmt}, ${offer.take} +${offer.takeAmt}`);
   return { ok: true, msg: `${npc.name}와 교환 완료! ${offer.take} +${offer.takeAmt}` };
 }
+
+// TODO(v2.3-visual): stabilize 2D text readability across UI/map/object labels
+ctx.font = '14px "Noto Sans KR", "Apple SD Gothic Neo", sans-serif';
+ctx.textAlign = 'left';
+ctx.textBaseline = 'alphabetic';
 
 const render3d = {
   ready: false,
@@ -549,10 +555,11 @@ function drawNpcHomes2D() {
 }
 
 function drawInteractionPOIs() {
+  // TODO(v2.3-visual): high-contrast POI pictograms (no blank dot fallback)
   const pois = [
     { p: FOUNTAIN, icon: '⛲' },
     { p: CAMPFIRE, icon: '🔥' },
-    { p: LOOKOUT, icon: '🗼' },
+    { p: LOOKOUT, icon: '🔭' },
     { p: PIER, icon: '🎣' },
   ];
   pois.forEach(({ p, icon }) => {
@@ -599,7 +606,8 @@ function drawFarmArea() {
 
   state.crops.forEach((c) => {
     const cp = worldToScreen(c.x, c.y);
-    const icon = c.stage >= 3 ? '🌻' : c.stage === 2 ? '🌿' : '🌱';
+    // TODO(v2.3-visual): crop growth readability (stage icon ladder)
+    const icon = c.stage >= 3 ? '🌸' : c.stage === 2 ? '🍀' : c.stage === 1 ? '🌿' : '🌱';
     ctx.fillText(icon, cp.x - 8, cp.y + 6);
   });
 
