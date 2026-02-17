@@ -58,7 +58,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v1.5: 시점기반 조작 + 월드 건물 상호작용 강화',
+  msg: 'v1.6: PolyHaven 우선 텍스처 체인 + PBR 고도화',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -101,7 +101,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v1.5',
+  version: 'v1.6',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -1178,24 +1178,34 @@ function markAssetStats(type, ok = true) {
   if (type === 'model') render3d.modelStats[key] += 1;
 }
 
-function createRemoteTexture(url, repeat = [1, 1], fallbackColor = '#8aa08a') {
+function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08a') {
+  const urls = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
   const fallback = createNoiseTexture(fallbackColor, '#6d826d', 128, 0.12);
   fallback.wrapS = fallback.wrapT = THREE.RepeatWrapping;
   fallback.repeat.set(repeat[0], repeat[1]);
   const loader = new THREE.TextureLoader();
-  loader.load(
-    url,
-    (tex) => {
-      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
-      tex.repeat.set(repeat[0], repeat[1]);
-      tex.colorSpace = THREE.SRGBColorSpace;
-      fallback.image = tex.image;
-      fallback.needsUpdate = true;
-      markAssetStats('texture', true);
-    },
-    undefined,
-    () => { markAssetStats('texture', false); },
-  );
+
+  const tryLoad = (idx = 0) => {
+    if (idx >= urls.length) {
+      markAssetStats('texture', false);
+      return;
+    }
+    loader.load(
+      urls[idx],
+      (tex) => {
+        tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+        tex.repeat.set(repeat[0], repeat[1]);
+        tex.colorSpace = THREE.SRGBColorSpace;
+        fallback.image = tex.image;
+        fallback.needsUpdate = true;
+        markAssetStats('texture', true);
+      },
+      undefined,
+      () => tryLoad(idx + 1),
+    );
+  };
+
+  tryLoad(0);
   return fallback;
 }
 
@@ -1209,39 +1219,78 @@ function createPBRTextureSet(basePath, repeat = [1, 1], fallbackColor = '#8aa08a
 
 function createWorldMaterials() {
   const grassPBR = {
-    map: createRemoteTexture('https://threejs.org/examples/textures/terrain/grasslight-big.jpg', [12, 12], '#7ba06a'),
-    normalMap: createRemoteTexture('https://threejs.org/examples/textures/terrain/grasslight-big-nm.jpg', [12, 12], '#7f7fff'),
-    roughnessMap: createRemoteTexture('https://threejs.org/examples/textures/terrain/grasslight-big.jpg', [12, 12], '#bcbcbc'),
-  };
-  const dirtPBR = {
-    map: createRemoteTexture('https://threejs.org/examples/textures/terrain/backgrounddetailed6.jpg', [10, 10], '#7d6a4f'),
-    normalMap: createRemoteTexture('https://threejs.org/examples/textures/water/Water_1_M_Normal.jpg', [10, 10], '#7f7fff'),
-    roughnessMap: createRemoteTexture('https://threejs.org/examples/textures/terrain/backgrounddetailed6.jpg', [10, 10], '#bcbcbc'),
-  };
-  const woodPBR = {
-    map: createRemoteTexture('https://threejs.org/examples/textures/hardwood2_diffuse.jpg', [4, 4], '#7a6149'),
-    normalMap: createRemoteTexture('https://threejs.org/examples/textures/hardwood2_bump.jpg', [4, 4], '#7f7fff'),
-    roughnessMap: createRemoteTexture('https://threejs.org/examples/textures/hardwood2_roughness.jpg', [4, 4], '#bcbcbc'),
-  };
-  const roofPBR = {
-    map: createRemoteTexture('https://threejs.org/examples/textures/brick_diffuse.jpg', [3, 3], '#7d3e3e'),
-    normalMap: createRemoteTexture('https://threejs.org/examples/textures/brick_normal.jpg', [3, 3], '#7f7fff'),
-    roughnessMap: createRemoteTexture('https://threejs.org/examples/textures/brick_roughness.jpg', [3, 3], '#bcbcbc'),
+    map: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_diff_1k.jpg',
+      'https://threejs.org/examples/textures/terrain/grasslight-big.jpg',
+    ], [12, 12], '#7ba06a'),
+    normalMap: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_nor_gl_1k.jpg',
+      'https://threejs.org/examples/textures/terrain/grasslight-big-nm.jpg',
+    ], [12, 12], '#7f7fff'),
+    roughnessMap: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_rough_1k.jpg',
+      'https://threejs.org/examples/textures/terrain/grasslight-big.jpg',
+    ], [12, 12], '#bcbcbc'),
   };
 
-  return {
-    grass: new THREE.MeshStandardMaterial({ ...grassPBR, roughness: 0.95, metalness: 0.02, envMapIntensity: 0.7 }),
-    dirt: new THREE.MeshStandardMaterial({ ...dirtPBR, roughness: 0.96, metalness: 0.02, envMapIntensity: 0.58 }),
-    wood: new THREE.MeshStandardMaterial({ ...woodPBR, roughness: 0.88, metalness: 0.05, envMapIntensity: 0.6 }),
+  const dirtPBR = {
+    map: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground_diff_1k.jpg',
+      'https://threejs.org/examples/textures/terrain/backgrounddetailed6.jpg',
+    ], [10, 10], '#7d6a4f'),
+    normalMap: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground_nor_gl_1k.jpg',
+      'https://threejs.org/examples/textures/water/Water_1_M_Normal.jpg',
+    ], [10, 10], '#7f7fff'),
+    roughnessMap: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground_rough_1k.jpg',
+      'https://threejs.org/examples/textures/terrain/backgrounddetailed6.jpg',
+    ], [10, 10], '#bcbcbc'),
+  };
+
+  const woodPBR = {
+    map: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_diff_1k.jpg',
+      'https://threejs.org/examples/textures/hardwood2_diffuse.jpg',
+    ], [4, 4], '#7a6149'),
+    normalMap: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_nor_gl_1k.jpg',
+      'https://threejs.org/examples/textures/hardwood2_bump.jpg',
+    ], [4, 4], '#7f7fff'),
+    roughnessMap: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_rough_1k.jpg',
+      'https://threejs.org/examples/textures/hardwood2_roughness.jpg',
+    ], [4, 4], '#bcbcbc'),
+  };
+
+  const roofPBR = {
+    map: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_diff_1k.jpg',
+      'https://threejs.org/examples/textures/brick_diffuse.jpg',
+    ], [3, 3], '#7d3e3e'),
+    normalMap: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_nor_gl_1k.jpg',
+      'https://threejs.org/examples/textures/brick_normal.jpg',
+    ], [3, 3], '#7f7fff'),
+    roughnessMap: createRemoteTexture([
+      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_rough_1k.jpg',
+      'https://threejs.org/examples/textures/brick_roughness.jpg',
+    ], [3, 3], '#bcbcbc'),
+  };
+
+return {
+    grass: new THREE.MeshStandardMaterial({ ...grassPBR, roughness: 0.9, metalness: 0.02, envMapIntensity: 0.85, normalScale: new THREE.Vector2(1.2, 1.2) }),
+    dirt: new THREE.MeshStandardMaterial({ ...dirtPBR, roughness: 0.94, metalness: 0.02, envMapIntensity: 0.7, normalScale: new THREE.Vector2(0.9, 0.9) }),
+    wood: new THREE.MeshStandardMaterial({ ...woodPBR, roughness: 0.72, metalness: 0.08, envMapIntensity: 0.92, normalScale: new THREE.Vector2(1.1, 1.1) }),
     bark: new THREE.MeshStandardMaterial({ color: '#4d3422', roughness: 0.92 }),
     leaf: new THREE.MeshStandardMaterial({ color: '#4b8f45', roughness: 0.82, envMapIntensity: 0.5 }),
     water: new THREE.MeshPhysicalMaterial({
       color: '#4d9ad3', roughness: 0.18, metalness: 0.05, transmission: 0.38, transparent: true, opacity: 0.9,
       ior: 1.33, clearcoat: 0.65, clearcoatRoughness: 0.16,
     }),
-    bridge: new THREE.MeshStandardMaterial({ ...woodPBR, roughness: 0.82, metalness: 0.06, envMapIntensity: 0.62 }),
+    bridge: new THREE.MeshStandardMaterial({ ...woodPBR, roughness: 0.68, metalness: 0.08, envMapIntensity: 0.95, normalScale: new THREE.Vector2(1.15, 1.15) }),
     wall: new THREE.MeshStandardMaterial({ color: '#f0e7dc', roughness: 0.78, envMapIntensity: 0.68 }),
-    roof: new THREE.MeshStandardMaterial({ ...roofPBR, roughness: 0.74, envMapIntensity: 0.72 }),
+    roof: new THREE.MeshStandardMaterial({ ...roofPBR, roughness: 0.62, envMapIntensity: 1.0, normalScale: new THREE.Vector2(1.25, 1.25) }),
     npc: new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.62 }),
     player: new THREE.MeshStandardMaterial({ color: '#3b82f6', roughness: 0.55 }),
   };
@@ -1700,7 +1749,7 @@ function updateUI() {
     textures: { ...render3d.textureStats },
     models: { ...render3d.modelStats },
     mode: state.renderMode,
-    note: 'PolyHaven/Quixel 직접 스크랩 대신 공개 접근 가능한 텍스처 소스 사용',
+    note: 'PolyHaven 우선 로딩 + 백업 텍스처 체인 사용',
   };
 
   const t = (Math.sin(state.time * 0.0023) + 1) / 2;
