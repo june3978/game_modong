@@ -484,6 +484,9 @@ function initNPCs() {
     target: null,
     pause: false,
     talk: '',
+    talkTimer: 0,
+    stuckFrames: 0,
+    lastProgressDist: 0,
   }));
 
   state.npcs.forEach((n) => {
@@ -815,18 +818,52 @@ function npcScheduledState(npc) {
   return 'social';
 }
 
+function pickLandTarget(npc, stateName = 'wander') {
+  const centers = [
+    { x: npc.home.x, y: npc.home.y + 38 },
+    { x: HOUSE_PLOT.x + 90, y: HOUSE_PLOT.y + 90 },
+    { x: FARM.x + FARM.w / 2, y: FARM.y + FARM.h / 2 },
+    { x: SHOP_PLOT.x + 92, y: SHOP_PLOT.y + 102 },
+    { x: MUSEUM_PLOT.x + 106, y: MUSEUM_PLOT.y + 110 },
+    FOUNTAIN,
+    CAMPFIRE,
+    LOOKOUT,
+    PIER,
+  ];
+
+  const ring = stateName === 'idle' ? 26 : stateName === 'social' ? 92 : stateName === 'farm' ? 70 : 300;
+  for (let i = 0; i < 18; i += 1) {
+    const c = centers[(i + state.day + npc.name.length) % centers.length];
+    const cand = {
+      x: wrapAxis(c.x + rnd(-ring, ring), WORLD_W),
+      y: wrapAxis(c.y + rnd(-ring, ring), WORLD_H),
+    };
+    if (tileAt(cand.x, cand.y).b !== 'water' && isWalkable(cand.x, cand.y)) return cand;
+  }
+
+  return { x: npc.home.x, y: npc.home.y + 36 };
+}
+
 function updateNPCs() {
   state.npcs.forEach((n) => {
     if (n.pause) return;
     n.state = npcScheduledState(n);
     if (n.id !== 'maru' && n.state === 'fish') n.state = 'wander';
+    if (n.talkTimer > 0) n.talkTimer -= 1;
 
-    if (!n.target || dist(n, n.target) < 20) {
-      if (n.state === 'fish') n.target = { x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE), y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE) };
-      else if (n.state === 'farm') n.target = { x: FARM.x + rnd(10, FARM.w - 10), y: FARM.y + rnd(10, FARM.h - 10) };
-      else if (n.state === 'social') n.target = { x: n.home.x + rnd(-90, 90), y: n.home.y + rnd(-80, 110) };
-      else if (n.state === 'idle') n.target = { x: n.home.x + rnd(-20, 20), y: n.home.y + 34 };
-      else n.target = { x: wrapAxis(n.home.x + rnd(-480, 480), WORLD_W), y: wrapAxis(n.home.y + rnd(-360, 360), WORLD_H) };
+    const needNewTarget = !n.target || dist(n, n.target) < 20;
+    if (needNewTarget) {
+      if (n.state === 'fish') {
+        n.target = { x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE), y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE) };
+      } else {
+        n.target = pickLandTarget(n, n.state);
+      }
+      n.stuckFrames = 0;
+    }
+
+    if (n.id !== 'maru' && n.target && tileAt(n.target.x, n.target.y).b === 'water') {
+      n.target = pickLandTarget(n, n.state);
+      n.stuckFrames = 0;
     }
 
     const dx = circularDelta(n.target.x, n.x, WORLD_W);
@@ -846,22 +883,38 @@ function updateNPCs() {
         n.vy = 0;
       }
       n.facing = facingTo(n, n.target);
+
+      const moved = Math.hypot(n.vx, n.vy);
+      if (d > 26 && moved < 0.05) n.stuckFrames += 1;
+      else n.stuckFrames = 0;
+
+      if (n.stuckFrames > 120) {
+        n.target = n.state === 'fish'
+          ? { x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE), y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE) }
+          : pickLandTarget(n, n.state);
+        n.stuckFrames = 0;
+      }
     } else {
       n.vx = 0;
       n.vy = 0;
+      n.stuckFrames = 0;
     }
 
     if (n.id !== 'maru' && tileAt(n.x, n.y).b === 'water') {
       n.x = n.home.x + rnd(-40, 40);
       n.y = n.home.y + rnd(24, 72);
-      n.target = null;
+      n.target = pickLandTarget(n, 'idle');
       n.vx = 0;
       n.vy = 0;
+      n.stuckFrames = 0;
       n.talk = '물은 싫어! 뭍으로 돌아왔어.';
+      n.talkTimer = 60;
     }
 
     const rel = state.relationships[n.id] || 0;
-    n.talk = dist(state.player, n) < 100 ? `${n.state === 'social' ? '수다 떨래?' : 'E로 대화!'} (호감 ${rel})` : '';
+    if (n.talkTimer <= 0) {
+      n.talk = dist(state.player, n) < 100 ? `${n.state === 'social' ? '수다 떨래?' : 'E로 대화!'} (호감 ${rel})` : '';
+    }
   });
 }
 
