@@ -5,6 +5,7 @@ const ui = {
   stats: document.getElementById('statsBar'),
   inventory: document.getElementById('inventory'),
   quest: document.getElementById('quest'),
+  log: document.getElementById('log'),
   message: document.getElementById('message'),
   fishingUi: document.getElementById('fishingUi'),
   modal: document.getElementById('modal'),
@@ -14,6 +15,7 @@ const ui = {
   btnCraft: document.getElementById('btnCraft'),
   btnShop: document.getElementById('btnShop'),
   btnBuild: document.getElementById('btnBuild'),
+  btnTown: document.getElementById('btnTown'),
 };
 
 const TILE = 48;
@@ -22,35 +24,13 @@ const MAP_H = 32;
 const WORLD_W = MAP_W * TILE;
 const WORLD_H = MAP_H * TILE;
 
-const ITEMS = [
-  ['wood', '🪵'], ['flower', '🌸'], ['berry', '🫐'], ['shell', '🐚'], ['fish', '🐟'], ['furniture', '🪑']
-];
-
-const state = {
-  keys: new Set(),
-  camera: { x: 0, y: 0 },
-  time: 0,
-  weather: 'sunny',
-  msg: '연못에 다리를 건설해서 그 위에서 낚시해보세요.',
-  msgTimer: 300,
-  coins: 90,
-  level: 1,
-  xp: 0,
-  player: { x: 420, y: 420, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false },
-  inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, furniture: 0 },
-  objects: [],
-  fishes: [],
-  npcs: [],
-  dialogue: null,
-  bridgeBuilt: false,
-  house: { tier: 0, inside: false, furniture: [], doorX: 520, doorY: 560 },
-  fishing: { active: false, phase: 'idle', timer: 0, biteWindow: 0, cursor: 0.1, dir: 1, zoneStart: 0.45, zoneWidth: 0.2, progress: 0, actor: null },
-  quest: { title: '마을 낚시대회 준비', needs: { fish: 5, wood: 8 }, reward: 220, done: false },
-};
+const ITEMS = [['wood', '🪵'], ['flower', '🌸'], ['berry', '🫐'], ['shell', '🐚'], ['fish', '🐟'], ['seed', '🌱'], ['furniture', '🪑']];
+const SEASONS = ['봄', '여름', '가을', '겨울'];
 
 const WATER = { x1: 31, x2: 46, y1: 8, y2: 23 };
 const BRIDGE = { x1: 36, x2: 40, y: 15 };
 const HOUSE_PLOT = { x: 470, y: 520, w: 180, h: 140 };
+const FARM = { x: 240, y: 560, w: 180, h: 120 };
 
 const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   Array.from({ length: MAP_W }, (_, gx) => {
@@ -62,15 +42,50 @@ const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   })
 );
 
+const state = {
+  keys: new Set(),
+  camera: { x: 0, y: 0 },
+  time: 0,
+  day: 1,
+  season: 0,
+  weather: 'sunny',
+  msg: '고도화 1단계: 농사/저장/일정 기반 시스템이 추가되었습니다.',
+  msgTimer: 280,
+  logs: ['게임 시작'],
+  coins: 110,
+  level: 1,
+  xp: 0,
+  player: { x: 420, y: 420, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false },
+  inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, seed: 2, furniture: 0 },
+  objects: [],
+  fishes: [],
+  crops: [],
+  npcs: [],
+  dialogue: null,
+  bridgeBuilt: false,
+  house: { tier: 0, inside: false, furniture: [], doorX: 520, doorY: 560 },
+  fishing: { active: false, phase: 'idle', timer: 0, biteWindow: 0, cursor: 0.1, dir: 1, zoneStart: 0.45, zoneWidth: 0.2, progress: 0 },
+  quests: [
+    { id: 'fish_fest', title: '마을 낚시대회 준비', needs: { fish: 5, wood: 8 }, reward: 220 },
+    { id: 'farm_week', title: '주말 장터용 작물 준비', needs: { flower: 8, berry: 8 }, reward: 260 },
+    { id: 'cozy_home', title: '포근한 집 꾸미기', needs: { furniture: 3, wood: 10 }, reward: 340 },
+  ],
+  questIndex: 0,
+  questDone: false,
+};
+
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function rnd(min, max) { return Math.random() * (max - min) + min; }
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 function worldToScreen(x, y) { return { x: x - state.camera.x, y: y - state.camera.y }; }
 
-function setMsg(text, t = 170) {
-  state.msg = text;
-  state.msgTimer = t;
+function setMsg(text, t = 170) { state.msg = text; state.msgTimer = t; }
+function addLog(text) {
+  state.logs.unshift(`[D${state.day}] ${text}`);
+  state.logs = state.logs.slice(0, 6);
 }
+
+function getQuest() { return state.quests[state.questIndex] || null; }
 
 function tileAt(x, y) {
   const gx = Math.floor(clamp(x, 0, WORLD_W - 1) / TILE);
@@ -87,6 +102,50 @@ function isWalkable(x, y) {
   const t = tileAt(x, y);
   if (t.b !== 'water') return true;
   return onBridge(x, y);
+}
+
+function saveGame() {
+  const snapshot = {
+    day: state.day,
+    season: state.season,
+    coins: state.coins,
+    level: state.level,
+    xp: state.xp,
+    inv: state.inv,
+    bridgeBuilt: state.bridgeBuilt,
+    house: state.house,
+    questIndex: state.questIndex,
+    questDone: state.questDone,
+    crops: state.crops,
+    player: { x: state.player.x, y: state.player.y },
+  };
+  localStorage.setItem('healing_island_save_v2', JSON.stringify(snapshot));
+}
+
+function loadGame() {
+  const raw = localStorage.getItem('healing_island_save_v2');
+  if (!raw) return;
+  try {
+    const s = JSON.parse(raw);
+    state.day = s.day ?? state.day;
+    state.season = s.season ?? state.season;
+    state.coins = s.coins ?? state.coins;
+    state.level = s.level ?? state.level;
+    state.xp = s.xp ?? state.xp;
+    state.inv = { ...state.inv, ...(s.inv || {}) };
+    state.bridgeBuilt = !!s.bridgeBuilt;
+    state.house = { ...state.house, ...(s.house || {}) };
+    state.questIndex = s.questIndex ?? state.questIndex;
+    state.questDone = !!s.questDone;
+    state.crops = Array.isArray(s.crops) ? s.crops : [];
+    if (s.player) {
+      state.player.x = s.player.x ?? state.player.x;
+      state.player.y = s.player.y ?? state.player.y;
+    }
+    addLog('저장 데이터 불러오기 완료');
+  } catch {
+    addLog('저장 데이터가 손상되어 초기 상태로 시작');
+  }
 }
 
 function spawnResources() {
@@ -120,7 +179,7 @@ function spawnFish() {
 function initNPCs() {
   state.npcs = [
     { id: 'luna', name: '루나', x: 820, y: 690, color: '#f59e0b', mood: 84, state: 'wander', target: null, pause: false, talk: '' },
-    { id: 'bomi', name: '보미', x: 1020, y: 620, color: '#22c55e', mood: 80, state: 'wander', target: null, pause: false, talk: '' },
+    { id: 'bomi', name: '보미', x: 1020, y: 620, color: '#22c55e', mood: 80, state: 'farm', target: null, pause: false, talk: '' },
     { id: 'maru', name: '마루', x: 1430, y: 760, color: '#60a5fa', mood: 82, state: 'fish', target: null, pause: false, talk: '' },
   ];
 }
@@ -151,8 +210,35 @@ function drawWorld() {
     }
   }
 
+  drawFarmArea();
   if (state.bridgeBuilt) drawBridge();
   drawHouseExterior();
+}
+
+function drawFarmArea() {
+  const p = worldToScreen(FARM.x, FARM.y);
+  ctx.fillStyle = '#8b5a2b';
+  ctx.fillRect(p.x, p.y, FARM.w, FARM.h);
+  ctx.fillStyle = '#6b3f1f';
+  for (let i = 0; i <= FARM.w; i += 36) {
+    ctx.fillRect(p.x + i, p.y, 2, FARM.h);
+  }
+  for (let i = 0; i <= FARM.h; i += 30) {
+    ctx.fillRect(p.x, p.y + i, FARM.w, 2);
+  }
+
+  state.crops.forEach((c) => {
+    const cp = worldToScreen(c.x, c.y);
+    const icon = c.stage >= 3 ? '🌻' : c.stage === 2 ? '🌿' : '🌱';
+    ctx.fillText(icon, cp.x - 8, cp.y + 6);
+  });
+
+  if (dist(state.player, { x: FARM.x + FARM.w / 2, y: FARM.y + FARM.h / 2 }) < 120) {
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillRect(p.x + 30, p.y - 26, 120, 20);
+    ctx.fillStyle = '#111827';
+    ctx.fillText('R: 심기/수확', p.x + 42, p.y - 12);
+  }
 }
 
 function drawBridge() {
@@ -215,12 +301,12 @@ function drawHouseInterior() {
   ctx.fillText('E : 집 나가기', canvas.width / 2 - 45, canvas.height - 40);
 
   state.house.furniture.forEach((f) => {
-    const x = 240 + f.gx * 120;
-    const y = 140 + f.gy * 110;
+    const x = 230 + f.gx * 110;
+    const y = 140 + f.gy * 90;
     ctx.fillStyle = '#8b5a2b';
     ctx.fillRect(x, y, 70, 42);
     ctx.fillStyle = '#fff';
-    ctx.fillText('🪑', x + 20, y + 28);
+    ctx.fillText('🪑', x + 22, y + 27);
   });
 }
 
@@ -320,24 +406,40 @@ function updateFish() {
   });
 }
 
+function npcScheduledState(npc) {
+  const phase = (Math.sin(state.time * 0.0023) + 1) / 2;
+  if (phase < 0.28) return 'idle';
+  if (phase < 0.45) return npc.id === 'maru' ? 'fish' : 'farm';
+  if (phase < 0.75) return npc.id === 'maru' ? 'fish' : 'wander';
+  return 'social';
+}
+
 function updateNPCs() {
   state.npcs.forEach((n) => {
     if (n.pause) return;
+
+    n.state = npcScheduledState(n);
+    if (n.state === 'farm') n.target = { x: FARM.x + rnd(10, FARM.w - 10), y: FARM.y + rnd(10, FARM.h - 10) };
+
     if (!n.target || dist(n, n.target) < 20) {
       if (n.state === 'fish') n.target = { x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE), y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE) };
+      else if (n.state === 'social') n.target = { x: HOUSE_PLOT.x + rnd(20, 160), y: HOUSE_PLOT.y + rnd(20, 120) };
+      else if (n.state === 'idle') n.target = { x: HOUSE_PLOT.x + 90, y: HOUSE_PLOT.y + 90 };
       else n.target = { x: rnd(80, WORLD_W - 80), y: rnd(80, WORLD_H - 80) };
     }
-    const dx = n.target.x - n.x, dy = n.target.y - n.y;
+
+    const dx = n.target.x - n.x;
+    const dy = n.target.y - n.y;
     const d = Math.hypot(dx, dy);
     if (d > 1) {
-      const nx = n.x + (dx / d) * 1.15;
-      const ny = n.y + (dy / d) * 1.15;
+      const spd = n.state === 'idle' ? 0.6 : 1.15;
+      const nx = n.x + (dx / d) * spd;
+      const ny = n.y + (dy / d) * spd;
       if (isWalkable(nx, ny) || n.state === 'fish') { n.x = nx; n.y = ny; }
       n.facing = facingTo(n, n.target);
     }
-    if (Math.random() < 0.002) n.state = n.state === 'fish' ? 'wander' : 'fish';
 
-    n.talk = dist(state.player, n) < 100 ? 'E로 대화!' : '';
+    n.talk = dist(state.player, n) < 100 ? `${n.state === 'social' ? '수다 떨래?' : 'E로 대화!'}` : '';
   });
 }
 
@@ -352,6 +454,45 @@ function collectResources() {
     return true;
   });
   if (state.objects.length < 130) spawnResources();
+}
+
+function handleFarmAction() {
+  const nearFarm = dist(state.player, { x: FARM.x + FARM.w / 2, y: FARM.y + FARM.h / 2 }) < 120;
+  if (!nearFarm) return;
+
+  const ready = state.crops.find((c) => c.stage >= 3);
+  if (ready) {
+    state.inv.flower += 2;
+    state.inv.berry += 1;
+    state.crops = state.crops.filter((c) => c !== ready);
+    setMsg('작물 수확! 꽃 +2, 열매 +1');
+    addLog('농사 수확 완료');
+    return;
+  }
+
+  if (state.inv.seed <= 0) {
+    setMsg('씨앗이 없습니다. 상점에서 구매하세요.');
+    return;
+  }
+
+  if (state.crops.length >= 8) {
+    setMsg('밭이 가득 찼습니다.');
+    return;
+  }
+
+  state.inv.seed -= 1;
+  state.crops.push({ x: FARM.x + rnd(14, FARM.w - 14), y: FARM.y + rnd(14, FARM.h - 14), stage: 0, grow: 0 });
+  setMsg('씨앗을 심었습니다.');
+}
+
+function updateCrops() {
+  state.crops.forEach((c) => {
+    c.grow += state.weather === 'rainy' ? 1.2 : 0.8;
+    if (c.grow > 420 && c.stage < 3) {
+      c.stage += 1;
+      c.grow = 0;
+    }
+  });
 }
 
 function nearFishingSpot() {
@@ -375,7 +516,7 @@ function startFishing() {
   state.fishing.dir = 1;
   state.fishing.zoneStart = rnd(0.2, 0.65);
   state.fishing.zoneWidth = rnd(0.14, 0.22);
-  state.fishing.progress = 0;
+  state.fishing.progress = 42;
   ui.fishingUi.classList.remove('hidden');
 }
 
@@ -453,14 +594,18 @@ function updateFishing() {
 function handleDialogueChoice(idx) {
   if (!state.dialogue) return;
   const n = state.dialogue.npc;
+  const q = getQuest();
+  if (!q) return;
+
   if (idx === 1) {
-    if (!state.quest.done && state.inv.fish >= state.quest.needs.fish && state.inv.wood >= state.quest.needs.wood) {
-      state.inv.fish -= state.quest.needs.fish;
-      state.inv.wood -= state.quest.needs.wood;
-      state.quest.done = true;
-      state.coins += state.quest.reward;
-      n.talk = '대박! 고마워!';
-      setMsg(`퀘스트 완료! 코인 +${state.quest.reward}`);
+    const met = Object.entries(q.needs).every(([k, v]) => (state.inv[k] || 0) >= v);
+    if (!state.questDone && met) {
+      Object.entries(q.needs).forEach(([k, v]) => { state.inv[k] -= v; });
+      state.coins += q.reward;
+      state.questDone = true;
+      n.talk = '완벽해! 고마워!';
+      setMsg(`퀘스트 완료! 코인 +${q.reward}`);
+      addLog(`퀘스트 완료: ${q.title}`);
     } else {
       n.mood = clamp(n.mood + 4, 0, 100);
       n.talk = '오늘도 평화롭다 😊';
@@ -474,9 +619,7 @@ function handleDialogueChoice(idx) {
       n.mood = clamp(n.mood + 10, 0, 100);
       n.talk = '열매 선물 고마워!';
       setMsg('선물 성공! 호감도 상승');
-    } else {
-      setMsg('열매가 없어요.');
-    }
+    } else setMsg('열매가 없어요.');
   }
   closeDialogue();
 }
@@ -520,12 +663,9 @@ function interact() {
 
 function placeFurniture() {
   if (!state.house.inside) return;
-  if (state.inv.furniture <= 0) {
-    setMsg('배치할 가구가 없어요. 제작에서 가구를 만드세요.');
-    return;
-  }
+  if (state.inv.furniture <= 0) return setMsg('배치할 가구가 없어요.');
   const gx = Math.floor(rnd(0, 4));
-  const gy = Math.floor(rnd(0, 3));
+  const gy = Math.floor(rnd(0, 4));
   state.house.furniture.push({ gx, gy });
   state.inv.furniture -= 1;
   setMsg('가구를 배치했습니다!');
@@ -543,7 +683,8 @@ function openCraft() {
   const html = `
   <div class="recipe"><span>🪑 기본 의자 (wood 4, flower 2)</span><button data-craft="chair">제작</button></div>
   <div class="recipe"><span>🌉 다리 키트 (wood 12, coins 80)</span><button data-craft="bridge">제작/설치</button></div>
-  <div class="recipe"><span>🎣 고급 미끼 (berry 2, shell 1) - 낚시 성공보너스</span><button data-craft="bait">제작</button></div>`;
+  <div class="recipe"><span>🎣 고급 미끼 (berry 2, shell 1)</span><button data-craft="bait">제작</button></div>
+  <div class="recipe"><span>🌱 씨앗 묶음 (flower 2)</span><button data-craft="seed">제작</button></div>`;
   openModal('제작', html);
   bindModalActions();
 }
@@ -552,7 +693,7 @@ function openShop() {
   const html = `
   <div class="shop-item"><span>집 건축권 (150 코인)</span><button data-shop="house">구매</button></div>
   <div class="shop-item"><span>집 업그레이드 (250 코인)</span><button data-shop="upgrade">업그레이드</button></div>
-  <div class="shop-item"><span>꽃씨 패키지 (20 코인)</span><button data-shop="seed">구매</button></div>`;
+  <div class="shop-item"><span>꽃씨 패키지 (20 코인)</span><button data-shop="seedpack">구매</button></div>`;
   openModal('상점', html);
   bindModalActions();
 }
@@ -560,8 +701,24 @@ function openShop() {
 function openBuild() {
   const html = `
   <div class="shop-item"><span>현재 집 단계: ${state.house.tier}</span><span>${state.house.tier === 0 ? '없음' : state.house.tier === 1 ? '오두막' : '코지하우스'}</span></div>
-  <div class="shop-item"><span>${state.bridgeBuilt ? '다리 설치 완료' : '다리 미설치'}</span><span>${state.bridgeBuilt ? '연못 가로지르기 가능' : '다리 키트 필요'}</span></div>`;
+  <div class="shop-item"><span>${state.bridgeBuilt ? '다리 설치 완료' : '다리 미설치'}</span><span>${state.bridgeBuilt ? '연못 이동 가능' : '다리 키트 필요'}</span></div>
+  <div class="shop-item"><span>농장 작물 수</span><span>${state.crops.length} / 8</span></div>`;
   openModal('건축 현황', html);
+}
+
+function openTownBoard() {
+  const q = getQuest();
+  const questText = q
+    ? `${q.title} / 요구: ${Object.entries(q.needs).map(([k, v]) => `${k} ${state.inv[k] || 0}/${v}`).join(', ')}`
+    : '모든 기본 퀘스트 완료';
+
+  const html = `
+  <div class="shop-item"><span>시즌</span><span>${SEASONS[state.season]}</span></div>
+  <div class="shop-item"><span>현재 날짜</span><span>${state.day}일차</span></div>
+  <div class="shop-item"><span>퀘스트</span><span>${state.questDone ? '제출 대기/완료' : '진행 중'}</span></div>
+  <div class="shop-item"><span style="font-weight:600">${questText}</span></div>
+  <div class="shop-item"><span>시스템 로드맵</span><span>1단계 완료 · 2단계 예정</span></div>`;
+  openModal('마을 보드', html);
 }
 
 function bindModalActions() {
@@ -576,10 +733,11 @@ function bindModalActions() {
         } else setMsg('재료가 부족합니다.');
       }
       if (c === 'bridge') {
-        if (state.bridgeBuilt) { setMsg('이미 다리가 있습니다.'); return; }
+        if (state.bridgeBuilt) return setMsg('이미 다리가 있습니다.');
         if (state.inv.wood >= 12 && state.coins >= 80) {
           state.inv.wood -= 12; state.coins -= 80; state.bridgeBuilt = true;
           setMsg('연못 다리 완성! 이제 다리 위에서 낚시할 수 있어요.');
+          addLog('다리 건설 완료');
         } else setMsg('목재 또는 코인이 부족합니다.');
       }
       if (c === 'bait') {
@@ -589,31 +747,38 @@ function bindModalActions() {
           setMsg('미끼 제작! 이번 낚시 타이밍 구간이 넓어집니다.');
         } else setMsg('재료가 부족합니다.');
       }
+      if (c === 'seed') {
+        if (state.inv.flower >= 2) {
+          state.inv.flower -= 2; state.inv.seed += 2;
+          setMsg('씨앗 제작 완료 (seed +2).');
+        } else setMsg('꽃이 부족합니다.');
+      }
 
       if (s === 'house') {
         if (state.house.tier > 0) return setMsg('이미 집을 보유 중입니다.');
-        if (state.coins >= 150) { state.coins -= 150; state.house.tier = 1; setMsg('오두막 건축 완료! 문 앞에서 E로 입장.'); }
+        if (state.coins >= 150) { state.coins -= 150; state.house.tier = 1; addLog('집 건축 완료'); setMsg('오두막 건축 완료! 문 앞에서 E로 입장.'); }
         else setMsg('코인이 부족합니다.');
       }
       if (s === 'upgrade') {
         if (state.house.tier === 0) return setMsg('먼저 집을 구매하세요.');
         if (state.house.tier >= 2) return setMsg('최대 업그레이드입니다.');
-        if (state.coins >= 250) { state.coins -= 250; state.house.tier = 2; setMsg('집 업그레이드 완료! 내부가 더 아늑해졌어요.'); }
+        if (state.coins >= 250) { state.coins -= 250; state.house.tier = 2; addLog('집 업그레이드 완료'); setMsg('집 업그레이드 완료! 내부가 더 아늑해졌어요.'); }
         else setMsg('코인이 부족합니다.');
       }
-      if (s === 'seed') {
-        if (state.coins >= 20) { state.coins -= 20; state.inv.flower += 2; setMsg('꽃씨 구매 완료 (꽃 +2).'); }
+      if (s === 'seedpack') {
+        if (state.coins >= 20) { state.coins -= 20; state.inv.seed += 3; setMsg('꽃씨 패키지 구매 완료 (seed +3).'); }
         else setMsg('코인이 부족합니다.');
       }
-
       updateUI();
+      saveGame();
     });
   });
 }
 
 function playerMove() {
   if (state.player.pause || state.house.inside) return;
-  let dx = 0, dy = 0;
+  let dx = 0;
+  let dy = 0;
   const run = state.keys.has('Shift');
   const spd = (run ? 1.45 : 1) * (state.player.energy > 0 ? state.player.speed : 1.2);
 
@@ -636,15 +801,54 @@ function playerMove() {
   }
 }
 
+function maybeProgressQuest() {
+  if (!state.questDone) return;
+  if (state.questIndex < state.quests.length - 1) {
+    state.questIndex += 1;
+    state.questDone = false;
+    setMsg(`새 퀘스트 시작: ${state.quests[state.questIndex].title}`);
+    addLog(`신규 퀘스트: ${state.quests[state.questIndex].id}`);
+  }
+}
+
+function updateEconomyAndLevel() {
+  const levelGoal = state.level * 140;
+  if (state.xp >= levelGoal) {
+    state.level += 1;
+    state.player.speed += 0.08;
+    setMsg(`레벨 업! Lv.${state.level}`);
+    addLog(`레벨 ${state.level} 달성`);
+  }
+}
+
+function updateCalendar() {
+  if (state.time % 2600 === 0) {
+    state.day += 1;
+    if (state.day % 7 === 0) {
+      state.season = (state.season + 1) % SEASONS.length;
+      addLog(`계절 변경: ${SEASONS[state.season]}`);
+      setMsg(`계절이 ${SEASONS[state.season]}(으)로 바뀌었습니다.`);
+    }
+    state.weather = Math.random() > 0.7 ? 'rainy' : 'sunny';
+    addLog(`새로운 하루 시작 (날씨: ${state.weather})`);
+    saveGame();
+  }
+}
+
 function updateUI() {
   const t = (Math.sin(state.time * 0.0023) + 1) / 2;
   const phase = t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
-  ui.stats.innerHTML = `🕒 ${phase} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level}`;
+  ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level}`;
   ui.inventory.innerHTML = ITEMS.map(([k, e]) => `<div>${e} ${k}: <b>${state.inv[k]}</b></div>`).join('');
-  ui.quest.innerHTML = state.quest.done
-    ? `✅ ${state.quest.title}<br>완료! 이제 집과 인테리어를 꾸며보세요.`
-    : `물고기 ${state.inv.fish}/${state.quest.needs.fish}, 목재 ${state.inv.wood}/${state.quest.needs.wood}<br>보상: ${state.quest.reward} 코인`;
 
+  const q = getQuest();
+  if (!q) ui.quest.innerHTML = '모든 1단계 퀘스트 완료!';
+  else {
+    const prog = Object.entries(q.needs).map(([k, v]) => `${k} ${state.inv[k]}/${v}`).join(', ');
+    ui.quest.innerHTML = `${state.questDone ? '✅' : '📌'} ${q.title}<br>${prog}<br>보상: ${q.reward} 코인`;
+  }
+
+  ui.log.innerHTML = state.logs.map((l) => `• ${l}`).join('<br>');
   ui.message.textContent = state.msgTimer > 0 ? state.msg : '';
 }
 
@@ -657,6 +861,7 @@ function tick() {
     updateFish();
     updateNPCs();
     collectResources();
+    updateCrops();
     updateCamera();
 
     drawWorld();
@@ -668,13 +873,11 @@ function tick() {
   }
 
   updateFishing();
-
-  if (state.time % 3000 === 0) {
-    state.weather = Math.random() > 0.7 ? 'rainy' : 'sunny';
-    setMsg(state.weather === 'rainy' ? '비가 내리기 시작했어요.' : '하늘이 맑게 갰어요.');
-  }
-
+  updateEconomyAndLevel();
+  maybeProgressQuest();
+  updateCalendar();
   updateUI();
+
   requestAnimationFrame(tick);
 }
 
@@ -694,8 +897,10 @@ window.addEventListener('keydown', (e) => {
   }
   if (key === 'e') { interact(); return; }
   if (key === 'f') { placeFurniture(); return; }
+  if (key === 'r') { handleFarmAction(); return; }
   state.keys.add(key);
 });
+
 window.addEventListener('keyup', (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   state.keys.delete(key);
@@ -704,9 +909,11 @@ window.addEventListener('keyup', (e) => {
 ui.btnCraft.addEventListener('click', openCraft);
 ui.btnShop.addEventListener('click', openShop);
 ui.btnBuild.addEventListener('click', openBuild);
+ui.btnTown.addEventListener('click', openTownBoard);
 ui.modalClose.addEventListener('click', closeModal);
 ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModal(); });
 
+loadGame();
 spawnResources();
 spawnFish();
 initNPCs();

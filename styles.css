@@ -1,6 +1,6 @@
 :root {
   --bg: #bfe8d0;
-  --panel: rgba(255, 255, 255, 0.82);
+  --panel: rgba(255, 255, 255, 0.84);
   --line: rgba(255, 255, 255, 0.95);
   --text: #1f2937;
   --shadow: 0 16px 35px rgba(16, 50, 29, 0.16);
@@ -34,14 +34,14 @@ body {
 .top-hud {
   grid-column: 1 / -1;
   display: grid;
-  grid-template-columns: 1fr 1.3fr auto;
+  grid-template-columns: 1fr 1.4fr auto;
   gap: 10px;
   align-items: center;
   padding: 10px 12px;
 }
 .brand { font-weight: 900; }
 .stats { display: flex; gap: 10px; flex-wrap: wrap; font-weight: 700; }
-.actions { display: flex; gap: 8px; }
+.actions { display: flex; gap: 8px; flex-wrap: wrap; justify-content: flex-end; }
 button { border: none; border-radius: 10px; padding: 8px 10px; font-weight: 700; cursor: pointer; background: #d1fae5; color: #14532d; }
 button:hover { filter: brightness(0.97); }
 
@@ -72,7 +72,7 @@ canvas { width: 100%; height: auto; border-radius: 12px; border: 1px solid rgba(
   position: absolute;
   left: 16px;
   top: 16px;
-  background: rgba(0,0,0,0.45);
+  background: rgba(0,0,0,0.5);
   color: #fff;
   border-radius: 10px;
   padding: 8px 10px;
@@ -87,7 +87,7 @@ canvas { width: 100%; height: auto; border-radius: 12px; border: 1px solid rgba(
   display: grid;
   place-items: center;
 }
-.modal-card { width: min(640px, 92vw); padding: 14px; }
+.modal-card { width: min(700px, 92vw); padding: 14px; }
 .modal-card h3 { margin: 0 0 10px; }
 #modalBody { display: grid; gap: 8px; margin-bottom: 10px; }
 .recipe, .shop-item { display: flex; justify-content: space-between; align-items: center; gap: 8px; background: rgba(255,255,255,0.75); border: 1px solid #fff; border-radius: 10px; padding: 8px; }
