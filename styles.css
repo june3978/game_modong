@@ -117,6 +117,34 @@ canvas {
   background: #8ad35f;
 }
 
+.dialogue.hidden { display: none; }
+.dialogue-text {
+  background: rgba(255,255,255,0.78);
+  border: 1px solid rgba(255,255,255,0.92);
+  border-radius: 10px;
+  padding: 10px;
+  line-height: 1.35;
+  color: #1f2937;
+  margin-bottom: 8px;
+}
+.dialogue-actions {
+  display: grid;
+  gap: 6px;
+}
+.dialogue-btn {
+  border: none;
+  border-radius: 10px;
+  padding: 8px 10px;
+  font-weight: 700;
+  cursor: pointer;
+  background: #d1fae5;
+  color: #14532d;
+}
+.dialogue-btn.ghost {
+  background: #e5e7eb;
+  color: #374151;
+}
+
 @media (max-width: 1120px) {
   .app { grid-template-columns: 1fr; }
   .hud-panel { max-height: none; }

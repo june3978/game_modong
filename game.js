@@ -13,6 +13,12 @@ const ui = {
   quest: document.getElementById('questBox'),
   hint: document.getElementById('hint'),
   restBtn: document.getElementById('restBtn'),
+  dialoguePanel: document.getElementById('dialoguePanel'),
+  dialogueName: document.getElementById('dialogueName'),
+  dialogueText: document.getElementById('dialogueText'),
+  dialogueChoiceA: document.getElementById('dialogueChoiceA'),
+  dialogueChoiceB: document.getElementById('dialogueChoiceB'),
+  dialogueClose: document.getElementById('dialogueClose'),
 };
 
 const TILE = 48;
@@ -35,6 +41,27 @@ const AI_LABELS = {
   gather: '채집',
   fish: '낚시',
   social: '대화',
+};
+
+const NPC_DIALOGUE_TEMPLATES = {
+  luna: {
+    greet: '루나: 오늘 숲 공기 진짜 좋다. 같이 산책할래?',
+    moodUp: '루나: 고마워! 네 덕분에 기분이 더 좋아졌어.',
+    questNeed: '루나: 잔치 재료가 아직 모자라. 꽃/물고기/목재를 부탁해!',
+    questDone: '루나: 완벽해! 이걸로 오늘 잔치 준비 끝! 🎉',
+  },
+  bomi: {
+    greet: '보미: 난 채집 루트를 최적화하는 중이야. 같이 할래?',
+    moodUp: '보미: 오, 효율 좋아졌어! 도움이 됐어.',
+    questNeed: '보미: 목재랑 꽃만 좀 더 있으면 돼!',
+    questDone: '보미: 속도전 성공! 준비 완료!',
+  },
+  maru: {
+    greet: '마루: 오늘 입질 괜찮은데? 낚시 팁 알려줄까?',
+    moodUp: '마루: 타이밍 좋았어. 네 감각, 인정!',
+    questNeed: '마루: 물고기가 조금 부족해. 호수 쪽 어때?',
+    questDone: '마루: 오케이, 잔치 메뉴 완성이다!',
+  },
 };
 
 const state = {
@@ -61,6 +88,8 @@ const state = {
     reward: 220,
     complete: false,
   },
+  relationships: { luna: 0, bomi: 0, maru: 0 },
+  dialogue: { open: false, npcId: null, text: '', choices: [] },
 };
 
 const CAMP = { x: 360, y: 440, w: 220, h: 210 };
@@ -606,35 +635,93 @@ function rest() {
   setHint('푹 쉬었습니다. 마음이 한결 가벼워졌어요.');
 }
 
+function closeDialogue() {
+  state.dialogue.open = false;
+  state.dialogue.npcId = null;
+  ui.dialoguePanel.classList.add('hidden');
+}
+
+function openDialogue(npc) {
+  const script = NPC_DIALOGUE_TEMPLATES[npc.id];
+  const needs = state.quest.needs;
+  const done = Object.entries(needs).every(([k, v]) => state.inventory[k] >= v);
+
+  state.dialogue.open = true;
+  state.dialogue.npcId = npc.id;
+
+  const baseText = state.quest.complete
+    ? `${script.greet}\n(친밀도 ${state.relationships[npc.id]})`
+    : done ? script.questDone : script.questNeed;
+
+  state.dialogue.text = baseText;
+  state.dialogue.choices = [
+    {
+      label: state.quest.complete ? '잡담하기 (+기분)' : done ? '재료 전달하기' : '도움 약속하기',
+      action: 'main',
+    },
+    {
+      label: '선물하기(열매 1개)',
+      action: 'gift',
+    },
+  ];
+
+  ui.dialogueName.textContent = `${npc.name}와 대화`;
+  ui.dialogueText.textContent = state.dialogue.text;
+  ui.dialogueChoiceA.textContent = `1) ${state.dialogue.choices[0].label}`;
+  ui.dialogueChoiceB.textContent = `2) ${state.dialogue.choices[1].label}`;
+  ui.dialoguePanel.classList.remove('hidden');
+}
+
+function applyDialogueChoice(choiceIdx) {
+  if (!state.dialogue.open) return;
+  const npc = state.npcs.find((n) => n.id === state.dialogue.npcId);
+  if (!npc) return;
+
+  const choice = state.dialogue.choices[choiceIdx];
+  if (!choice) return;
+
+  const script = NPC_DIALOGUE_TEMPLATES[npc.id];
+  const needs = state.quest.needs;
+  const done = Object.entries(needs).every(([k, v]) => state.inventory[k] >= v);
+
+  if (choice.action === 'main') {
+    if (!state.quest.complete && done) {
+      Object.entries(needs).forEach(([k, v]) => { state.inventory[k] -= v; });
+      state.quest.complete = true;
+      state.coins += state.quest.reward;
+      state.xp += 120;
+      ui.dialogueText.textContent = script.questDone + ` 코인 +${state.quest.reward}`;
+      setHint(`${npc.name}에게 재료를 전달했어요!`, 200);
+    } else {
+      npc.mood = clamp(npc.mood + 6, 0, 100);
+      state.player.mood = clamp(state.player.mood + 4, 0, 100);
+      state.relationships[npc.id] += 1;
+      ui.dialogueText.textContent = script.moodUp + ` (친밀도 ${state.relationships[npc.id]})`;
+      addFeed(`${npc.name}과(와) 대화로 친밀도 상승`);
+    }
+  }
+
+  if (choice.action === 'gift') {
+    if (state.inventory.berry > 0) {
+      state.inventory.berry -= 1;
+      npc.mood = clamp(npc.mood + 9, 0, 100);
+      state.relationships[npc.id] += 2;
+      addParticle(npc.x, npc.y - 12, '🎁', 'rgba(253, 230, 138, ALPHA)');
+      ui.dialogueText.textContent = `${npc.name}: 선물 고마워! (친밀도 ${state.relationships[npc.id]})`;
+      setHint('NPC에게 선물을 건넸습니다.', 180);
+    } else {
+      ui.dialogueText.textContent = '열매가 부족해요. 채집해서 다시 와주세요.';
+    }
+  }
+}
+
 function interact() {
   const nearest = state.npcs
     .map((n) => ({ n, d: dist(state.player, n) }))
     .sort((a, b) => a.d - b.d)[0];
 
-  if (nearest && nearest.d < 90) {
-    const npc = nearest.n;
-    npc.mood = clamp(npc.mood + 6, 0, 100);
-    state.player.mood = clamp(state.player.mood + 4, 0, 100);
-
-    if (!state.quest.complete) {
-      const needs = state.quest.needs;
-      const done = Object.entries(needs).every(([k, v]) => state.inventory[k] >= v);
-      if (done) {
-        Object.entries(needs).forEach(([k, v]) => { state.inventory[k] -= v; });
-        state.quest.complete = true;
-        state.coins += state.quest.reward;
-        state.xp += 100;
-        setHint(`${npc.name}: 와! 완벽해! 잔치 준비 완료! 코인 +${state.quest.reward}`);
-      } else {
-        setHint(`${npc.name}: 재료를 조금만 더 부탁해!`);
-      }
-    } else {
-      const tip = 8 + Math.floor(npc.mood / 18);
-      state.coins += tip;
-      setHint(`${npc.name}: 오늘도 반가워 😊 용돈 +${tip} 코인`);
-    }
-
-    addFeed(`${npc.name}와 대화했습니다. (기분 ${Math.floor(npc.mood)})`);
+  if (nearest && nearest.d < 95) {
+    openDialogue(nearest.n);
     return;
   }
 
@@ -744,6 +831,17 @@ function loop() {
 
 window.addEventListener('keydown', (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+
+  if (state.dialogue.open) {
+    if (key === '1') applyDialogueChoice(0);
+    if (key === '2') applyDialogueChoice(1);
+    if (key === 'escape') closeDialogue();
+    if (key === '1' || key === '2' || key === 'escape') {
+      e.preventDefault();
+      return;
+    }
+  }
+
   if (key === ' ') {
     fishAction();
     e.preventDefault();
@@ -762,6 +860,9 @@ window.addEventListener('keyup', (e) => {
 });
 
 ui.restBtn.addEventListener('click', rest);
+ui.dialogueChoiceA.addEventListener('click', () => applyDialogueChoice(0));
+ui.dialogueChoiceB.addEventListener('click', () => applyDialogueChoice(1));
+ui.dialogueClose.addEventListener('click', closeDialogue);
 
 spawnWorldObjects();
 spawnFish();
