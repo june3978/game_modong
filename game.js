@@ -65,6 +65,11 @@ const state = {
   crops: [],
   npcs: [],
   relationships: { luna: 20, bomi: 20, maru: 20 },
+  residentRequests: {
+    luna: { item: 'flower', need: 3, reward: 45, doneDay: 0 },
+    bomi: { item: 'wood', need: 3, reward: 45, doneDay: 0 },
+    maru: { item: 'fish', need: 2, reward: 55, doneDay: 0 },
+  },
   dialogue: null,
   bridgeBuilt: false,
   house: {
@@ -85,7 +90,7 @@ const state = {
   questDone: false,
   shopStock: { seedpackPrice: 20, furniturePrice: 55, fishPrice: 15 },
   decorScore: 0,
-  version: 'v0.3',
+  version: 'v0.4',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -132,6 +137,16 @@ function calcDailyShopStock() {
   state.shopStock.fishPrice = 12 + Math.floor(roll * 10);
 }
 
+function rollResidentRequests() {
+  const pool = ['flower', 'wood', 'berry', 'fish', 'shell'];
+  ['luna', 'bomi', 'maru'].forEach((id, idx) => {
+    const pick = pool[(state.day + idx + state.season) % pool.length];
+    const need = pick === 'fish' ? 2 : 3;
+    const reward = 35 + need * 10 + idx * 5;
+    state.residentRequests[id] = { item: pick, need, reward, doneDay: 0 };
+  });
+}
+
 function saveGame() {
   const snapshot = {
     day: state.day,
@@ -148,6 +163,7 @@ function saveGame() {
     questDone: state.questDone,
     crops: state.crops,
     relationships: state.relationships,
+    residentRequests: state.residentRequests,
     shopStock: state.shopStock,
     player: { x: state.player.x, y: state.player.y },
   };
@@ -173,6 +189,7 @@ function loadGame() {
     state.questDone = !!s.questDone;
     state.crops = Array.isArray(s.crops) ? s.crops : [];
     state.relationships = { ...state.relationships, ...(s.relationships || {}) };
+    state.residentRequests = { ...state.residentRequests, ...(s.residentRequests || {}) };
     state.shopStock = { ...state.shopStock, ...(s.shopStock || {}) };
     if (s.player) {
       state.player.x = s.player.x ?? state.player.x;
@@ -647,13 +664,25 @@ function handleDialogueChoice(idx) {
   }
 
   if (idx === 2) {
-    if (state.inv.berry > 0) {
+    const req = state.residentRequests[n.id];
+    if (req && req.doneDay !== state.day && (state.inv[req.item] || 0) >= req.need) {
+      state.inv[req.item] -= req.need;
+      state.coins += req.reward;
+      req.doneDay = state.day;
+      state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 6, 0, 100);
+      n.talk = `고마워! 오늘 부탁 해결!`;
+      setMsg(`${n.name} 요청 완료! +${req.reward} 코인`);
+      addLog(`${n.name} 일일 요청 완료 (${req.item} ${req.need})`);
+    } else if (state.inv.berry > 0) {
       state.inv.berry -= 1;
       n.mood = clamp(n.mood + 10, 0, 100);
       state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 4, 0, 100);
       n.talk = '열매 선물 고마워!';
       setMsg('선물 성공! 호감도 상승');
-    } else setMsg('열매가 없어요.');
+    } else {
+      const tip = req ? `오늘 요청: ${req.item} ${req.need}` : '열매가 없어요.';
+      setMsg(tip);
+    }
   }
   closeDialogue();
 }
@@ -769,6 +798,10 @@ function openTownBoard() {
     ? `${q.title} / 요구: ${Object.entries(q.needs).map(([k, v]) => `${k} ${state.inv[k] || 0}/${v}`).join(', ')}`
     : '모든 기본 퀘스트 완료';
 
+  const requests = Object.entries(state.residentRequests)
+    .map(([id, r]) => `${id}: ${r.item} ${r.need} (${r.doneDay === state.day ? '완료' : '미완'})`)
+    .join(' / ');
+
   const html = `
   <div class="shop-item"><span>시즌</span><span>${SEASONS[state.season]}</span></div>
   <div class="shop-item"><span>현재 날짜</span><span>${state.day}일차</span></div>
@@ -776,7 +809,8 @@ function openTownBoard() {
   <div class="shop-item"><span>퀘스트</span><span>${state.questDone ? '완료/진행 전환 대기' : '진행 중'}</span></div>
   <div class="shop-item"><span style="font-weight:600">${questText}</span></div>
   <div class="shop-item"><span>상점 변동</span><span>매일 가격 변동</span></div>
-  <div class="shop-item"><span>집 인테리어 점수</span><span>${state.decorScore}</span></div>`;
+  <div class="shop-item"><span>집 인테리어 점수</span><span>${state.decorScore}</span></div>
+  <div class="shop-item"><span>주민 일일요청</span><span>${requests}</span></div>`;
   openModal('마을 보드', html);
 }
 
@@ -915,6 +949,7 @@ function updateCalendar() {
     state.weather = Math.random() > 0.7 ? 'rainy' : 'sunny';
     state.dailyEvent = EVENTS[state.day % EVENTS.length];
     calcDailyShopStock();
+    rollResidentRequests();
     applyDailyEventEffect();
     if (state.day % 5 === 0 && state.house.tier > 0) {
       const bonus = Math.floor(state.decorScore * 0.6);
@@ -1017,6 +1052,7 @@ ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModa
 
 loadGame();
 calcDailyShopStock();
+rollResidentRequests();
 spawnResources();
 spawnFish();
 initNPCs();
