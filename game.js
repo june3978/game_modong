@@ -56,7 +56,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v1.2: 사실적 PBR/날씨 렌더 강화',
+  msg: 'v1.4: 모델 교체 + 애니메이션 동작 강화',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -99,7 +99,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v1.2',
+  version: 'v1.4',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -114,6 +114,11 @@ const render3d = {
   ctx: null,
   props: [],
   rain: null,
+  clock: null,
+  playerMixer: null,
+  npcMixers: [],
+  textureStats: { loaded: 0, failed: 0 },
+  modelStats: { loaded: 0, failed: 0 },
 };
 
 function setMsg(text, t = 170) { state.msg = text; state.msgTimer = t; }
@@ -900,6 +905,8 @@ function openTownBoard() {
 
   const html = `
   <div class="shop-item"><span>시즌</span><span>${SEASONS[state.season]}</span></div>
+  <div class="shop-item"><span>텍스처 로드</span><span>${render3d.textureStats.loaded} 성공 / ${render3d.textureStats.failed} 실패</span></div>
+  <div class="shop-item"><span>모델 로드</span><span>${render3d.modelStats.loaded} 성공 / ${render3d.modelStats.failed} 실패</span></div>
   <div class="shop-item"><span>현재 날짜</span><span>${state.day}일차</span></div>
   <div class="shop-item"><span>오늘 이벤트</span><span>${state.dailyEvent}</span></div>
   <div class="shop-item"><span>퀘스트</span><span>${state.questDone ? '완료/진행 전환 대기' : '진행 중'}</span></div>
@@ -1128,6 +1135,12 @@ function createNoiseTexture(base = '#6fa86a', accent = '#4f7f49', size = 256, sc
   return tex;
 }
 
+function markAssetStats(type, ok = true) {
+  const key = ok ? 'loaded' : 'failed';
+  if (type === 'texture') render3d.textureStats[key] += 1;
+  if (type === 'model') render3d.modelStats[key] += 1;
+}
+
 function createRemoteTexture(url, repeat = [1, 1], fallbackColor = '#8aa08a') {
   const fallback = createNoiseTexture(fallbackColor, '#6d826d', 128, 0.12);
   fallback.wrapS = fallback.wrapT = THREE.RepeatWrapping;
@@ -1141,9 +1154,10 @@ function createRemoteTexture(url, repeat = [1, 1], fallbackColor = '#8aa08a') {
       tex.colorSpace = THREE.SRGBColorSpace;
       fallback.image = tex.image;
       fallback.needsUpdate = true;
+      markAssetStats('texture', true);
     },
     undefined,
-    () => {},
+    () => { markAssetStats('texture', false); },
   );
   return fallback;
 }
@@ -1181,26 +1195,40 @@ function createWorldMaterials() {
 }
 
 async function loadFreeWorldProps() {
-  if (!window.THREE || !window.THREE.GLTFLoader || !render3d.world) return;
+  if (!render3d.world) return;
+
+  const addFallbackProp = (geo, mat, pos, rot = 0, scale = 1) => {
+    const mesh = new THREE.Mesh(geo, mat);
+    mesh.position.set(pos[0], pos[1], pos[2]);
+    mesh.rotation.y = rot;
+    mesh.scale.setScalar(scale);
+    mesh.castShadow = true;
+    mesh.receiveShadow = true;
+    render3d.world.add(mesh);
+    render3d.props.push(mesh);
+    markAssetStats('model', true);
+  };
+
+  if (!window.THREE || !window.THREE.GLTFLoader) {
+    addFallbackProp(new THREE.TorusKnotGeometry(0.45, 0.14, 80, 12), new THREE.MeshStandardMaterial({ color: '#7c3aed', roughness: 0.45, metalness: 0.35 }), [-10, 1.1, -6], 0.2, 1.2);
+    addFallbackProp(new THREE.DodecahedronGeometry(0.75, 0), new THREE.MeshStandardMaterial({ color: '#06b6d4', roughness: 0.35, metalness: 0.5 }), [9, 0.95, -8], -0.2, 1.1);
+    addFallbackProp(new THREE.IcosahedronGeometry(0.82, 0), new THREE.MeshStandardMaterial({ color: '#f97316', roughness: 0.4, metalness: 0.3 }), [12, 1.0, 8], 0.4, 1);
+    return;
+  }
+
   const loader = new THREE.GLTFLoader();
   const specs = [
     {
       url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Avocado/glTF-Binary/Avocado.glb',
-      pos: [-10, 0.35, -6],
-      rotY: 0.8,
-      scale: 8,
+      pos: [-10, 0.35, -6], rotY: 0.8, scale: 8,
     },
     {
       url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/WaterBottle/glTF-Binary/WaterBottle.glb',
-      pos: [9, 0.3, -8],
-      rotY: -0.3,
-      scale: 5,
+      pos: [9, 0.3, -8], rotY: -0.3, scale: 5,
     },
     {
       url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/BoomBox/glTF-Binary/BoomBox.glb',
-      pos: [12, 0.3, 8],
-      rotY: 0.5,
-      scale: 18,
+      pos: [12, 0.3, 8], rotY: 0.5, scale: 18,
     },
   ];
 
@@ -1218,11 +1246,63 @@ async function loadFreeWorldProps() {
       });
       render3d.world.add(model);
       render3d.props.push(model);
+      markAssetStats('model', true);
       resolve();
-    }, undefined, () => resolve());
+    }, undefined, () => { markAssetStats('model', false); resolve(); });
   });
 
   await Promise.all(specs.map(loadOne));
+}
+
+function createRigCharacter(primary = '#3b82f6', secondary = '#0f172a', scale = 1) {
+  const g = new THREE.Group();
+  const bodyMat = new THREE.MeshStandardMaterial({ color: primary, roughness: 0.58, metalness: 0.05 });
+  const clothMat = new THREE.MeshStandardMaterial({ color: secondary, roughness: 0.72, metalness: 0.02 });
+  const skinMat = new THREE.MeshStandardMaterial({ color: '#f3d1b3', roughness: 0.7 });
+
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.35 * scale, 0.78 * scale, 6, 12), bodyMat);
+  torso.position.y = 1.25 * scale;
+  torso.castShadow = true;
+
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28 * scale, 16, 16), skinMat);
+  head.position.y = 1.98 * scale;
+  head.castShadow = true;
+
+  const armL = new THREE.Mesh(new THREE.CapsuleGeometry(0.1 * scale, 0.5 * scale, 6, 10), clothMat);
+  const armR = armL.clone();
+  armL.position.set(-0.43 * scale, 1.25 * scale, 0);
+  armR.position.set(0.43 * scale, 1.25 * scale, 0);
+  armL.castShadow = armR.castShadow = true;
+
+  const legL = new THREE.Mesh(new THREE.CapsuleGeometry(0.12 * scale, 0.62 * scale, 6, 10), clothMat);
+  const legR = legL.clone();
+  legL.position.set(-0.18 * scale, 0.58 * scale, 0);
+  legR.position.set(0.18 * scale, 0.58 * scale, 0);
+  legL.castShadow = legR.castShadow = true;
+
+  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.22 * scale, 0.28 * scale, 0.13 * scale), new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.86 }));
+  bag.position.set(-0.27 * scale, 1.2 * scale, -0.25 * scale);
+  bag.castShadow = true;
+
+  g.add(torso, head, armL, armR, legL, legR, bag);
+  g.userData.parts = { armL, armR, legL, legR, torso };
+  g.userData.phase = Math.random() * Math.PI * 2;
+  return g;
+}
+
+function animateRigCharacter(model, t, moving = true) {
+  if (!model?.userData?.parts) return;
+  const { armL, armR, legL, legR, torso } = model.userData.parts;
+  const speed = moving ? 7.2 : 2.2;
+  const amp = moving ? 0.72 : 0.16;
+  const wave = Math.sin(t * speed + (model.userData.phase || 0));
+  const sway = Math.cos(t * speed * 0.5 + (model.userData.phase || 0));
+
+  armL.rotation.x = wave * amp;
+  armR.rotation.x = -wave * amp;
+  legL.rotation.x = -wave * amp * 0.9;
+  legR.rotation.x = wave * amp * 0.9;
+  torso.rotation.z = sway * 0.04;
 }
 
 function createCharacterMesh(material, scale = 1) {
@@ -1307,13 +1387,19 @@ function buildThreeWorld() {
   render3d.house = house;
   render3d.world.add(house);
 
-  render3d.player = createCharacterMesh(mats.player, 1);
+  render3d.player = createRigCharacter('#3b82f6', '#1e293b', 1);
   render3d.world.add(render3d.player);
+  markAssetStats('model', true);
 
-  render3d.npcMeshes = state.npcs.map((npc) => {
-    const mat = new THREE.MeshStandardMaterial({ color: npc.color, roughness: 0.72 });
-    const mesh = createCharacterMesh(mat, 0.95);
+  render3d.npcMeshes = state.npcs.map((npc, idx) => {
+    const palette = [
+      ['#f59e0b', '#7c2d12'],
+      ['#34d399', '#14532d'],
+      ['#f472b6', '#831843'],
+    ][idx % 3];
+    const mesh = createRigCharacter(palette[0], palette[1], 0.95);
     render3d.world.add(mesh);
+    markAssetStats('model', true);
     return mesh;
   });
 
@@ -1333,6 +1419,8 @@ async function ensure3DWorld() {
     return;
   }
   render3d.loading = true;
+  render3d.textureStats = { loaded: 0, failed: 0 };
+  render3d.modelStats = { loaded: 0, failed: 0 };
   try {
     ui.game3d.innerHTML = '';
     const scene = new THREE.Scene();
@@ -1398,6 +1486,9 @@ async function ensure3DWorld() {
     render3d.bounce = bounce;
     render3d.skyDome = skyDome;
     render3d.rain = rain;
+    render3d.clock = new THREE.Clock();
+    render3d.playerMixer = null;
+    render3d.npcMixers = [];
 
     buildThreeWorld();
     await loadFreeWorldProps();
@@ -1427,12 +1518,15 @@ function sync3DEntities() {
 
   const p = to3D(state.player.x, state.player.y);
   render3d.player.position.set(p.x, 0.25, p.z);
+  animateRigCharacter(render3d.player, state.time * 0.016, state.keys.size > 0);
 
   state.npcs.forEach((npc, i) => {
     const mesh = render3d.npcMeshes[i];
     if (!mesh) return;
     const n = to3D(npc.x, npc.y);
     mesh.position.set(n.x, 0.25, n.z);
+    const npcMoving = Math.abs(npc.vx || 0) + Math.abs(npc.vy || 0) > 0.05;
+    animateRigCharacter(mesh, state.time * 0.016 + i * 0.7, npcMoving);
   });
 
   state.objects.forEach((obj, i) => {
@@ -1454,6 +1548,9 @@ function sync3DEntities() {
 function renderWorld3D() {
   if (!render3d.ready) return;
   sync3DEntities();
+
+  const dt = render3d.clock ? render3d.clock.getDelta() : 0.016;
+  const animTime = state.time * 0.016 + dt;
 
   const centerX = state.player.x / TILE - MAP_W / 2;
   const centerZ = state.player.y / TILE - MAP_H / 2;
@@ -1511,10 +1608,16 @@ function syncRenderSurface() {
 }
 
 function updateUI() {
+  window.__renderStats = {
+    textures: { ...render3d.textureStats },
+    models: { ...render3d.modelStats },
+    mode: state.renderMode,
+  };
+
   const t = (Math.sin(state.time * 0.0023) + 1) / 2;
   const phase = t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
   state.decorScore = calcDecorScore();
-  ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · 🎉 ${state.dailyEvent} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level} · 🏠 ${state.decorScore} · ${state.renderMode.toUpperCase()} · ${state.version}`;
+  ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · 🎉 ${state.dailyEvent} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level} · 🏠 ${state.decorScore} · ${state.renderMode.toUpperCase()} · TX ${render3d.textureStats.loaded}/${render3d.textureStats.failed} · MD ${render3d.modelStats.loaded}/${render3d.modelStats.failed} · ${state.version}`;
   ui.inventory.innerHTML = ITEMS.map(([k, e]) => `<div>${e} ${k}: <b>${state.inv[k]}</b></div>`).join('');
 
   const q = getQuest();
