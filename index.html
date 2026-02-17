@@ -3,17 +3,17 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>모동 힐링 포레스트 · 디럭스</title>
+  <title>힐링 포레스트: 시뮬레이션 에디션</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <main class="app">
     <aside class="hud-panel glass">
-      <h1>🌿 힐링 포레스트: 디럭스</h1>
-      <p class="subtitle">2D 감성 슬로우 라이프 · 산책 · 채집 · 낚시 · 퀘스트</p>
+      <h1>🌿 힐링 포레스트: 시뮬레이션</h1>
+      <p class="subtitle">월드 시뮬레이션 · NPC AI · 느긋한 생활 루프</p>
 
       <section class="hud-section">
-        <h2>상태</h2>
+        <h2>월드 상태</h2>
         <div class="stats-grid">
           <span id="timeLabel">🕒 아침</span>
           <span id="weatherLabel">☀️ 맑음</span>
@@ -27,6 +27,11 @@
       <section class="hud-section">
         <h2>인벤토리</h2>
         <div class="inv-grid" id="inventory"></div>
+      </section>
+
+      <section class="hud-section">
+        <h2>NPC 라이브 피드</h2>
+        <div id="npcFeed" class="npc-feed"></div>
       </section>
 
       <section class="hud-section">
@@ -49,7 +54,7 @@
     </aside>
 
     <section class="world-panel glass">
-      <canvas id="game" width="1280" height="720" aria-label="2D 힐링 게임 월드"></canvas>
+      <canvas id="game" width="1280" height="720" aria-label="2D 힐링 시뮬레이션"></canvas>
     </section>
   </main>
 
