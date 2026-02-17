@@ -59,13 +59,14 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v1.8: 3D 조작/대화/방향 동기화 개선',
+  msg: 'v1.9: NPC/조개 동선 안정화 + 3D 상호작용 보강',
   msgTimer: 280,
+  prompt: '',
   logs: ['게임 시작'],
   coins: 110,
   level: 1,
   xp: 0,
-  player: { x: 420, y: 420, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false },
+  player: { x: 420, y: 420, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false, lastSafeX: 420, lastSafeY: 420 },
   inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, bug: 0, seed: 2, furniture: 0 },
   objects: [],
   fishes: [],
@@ -102,7 +103,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v1.8',
+  version: 'v1.9',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -155,6 +156,20 @@ function isWalkable(x, y) {
   if (t.b !== 'water') return true;
   return onBridge(x, y);
 }
+
+
+function nearWaterEdge(x, y) {
+  const t = tileAt(x, y);
+  if (t.b === 'water') return false;
+  const around = [
+    tileAt(x + TILE * 0.55, y).b,
+    tileAt(x - TILE * 0.55, y).b,
+    tileAt(x, y + TILE * 0.55).b,
+    tileAt(x, y - TILE * 0.55).b,
+  ];
+  return around.includes('water');
+}
+
 
 function calcDailyShopStock() {
   const roll = Math.abs(Math.sin(state.day * 1.73 + state.season * 0.31));
@@ -280,9 +295,10 @@ function spawnResources() {
   for (let y = 1; y < MAP_H - 1; y++) {
     for (let x = 1; x < MAP_W - 1; x++) {
       const b = biomes[y][x];
-      if (b === 'water') {
-        if (Math.random() < 0.03) list.push({ type: 'shell', x: x * TILE + rnd(8, TILE - 8), y: y * TILE + rnd(8, TILE - 8), bob: rnd(0, 6.28) });
-        continue;
+      if (b === 'water') continue;
+
+      if (nearWaterEdge(x * TILE + TILE * 0.5, y * TILE + TILE * 0.5) && Math.random() < 0.06) {
+        list.push({ type: 'shell', x: x * TILE + rnd(8, TILE - 8), y: y * TILE + rnd(8, TILE - 8), bob: rnd(0, 6.28) });
       }
       const c = b === 'grove' ? 0.12 : 0.1;
       if (Math.random() < c) {
@@ -309,6 +325,15 @@ function initNPCs() {
     { id: 'bomi', name: '보미', x: 1020, y: 620, color: '#22c55e', mood: 80, state: 'farm', target: null, pause: false, talk: '' },
     { id: 'maru', name: '마루', x: 1430, y: 760, color: '#60a5fa', mood: 82, state: 'fish', target: null, pause: false, talk: '' },
   ];
+
+  state.npcs.forEach((n) => {
+    if (tileAt(n.x, n.y).b === 'water' && n.id !== 'maru') {
+      n.x = HOUSE_PLOT.x + 60 + Math.random() * 80;
+      n.y = HOUSE_PLOT.y + 80 + Math.random() * 50;
+    }
+    n.vx = 0;
+    n.vy = 0;
+  });
 }
 
 function drawWorld() {
@@ -585,6 +610,7 @@ function updateNPCs() {
   state.npcs.forEach((n) => {
     if (n.pause) return;
     n.state = npcScheduledState(n);
+    if (n.id !== 'maru' && n.state === 'fish') n.state = 'wander';
 
     if (!n.target || dist(n, n.target) < 20) {
       if (n.state === 'fish') n.target = { x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE), y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE) };
@@ -616,6 +642,15 @@ function updateNPCs() {
       n.vy = 0;
     }
 
+    if (n.id !== 'maru' && tileAt(n.x, n.y).b === 'water') {
+      n.x = HOUSE_PLOT.x + 90 + rnd(-40, 40);
+      n.y = HOUSE_PLOT.y + 90 + rnd(-30, 30);
+      n.target = null;
+      n.vx = 0;
+      n.vy = 0;
+      n.talk = '물은 싫어! 뭍으로 돌아왔어.';
+    }
+
     const rel = state.relationships[n.id] || 0;
     n.talk = dist(state.player, n) < 100 ? `${n.state === 'social' ? '수다 떨래?' : 'E로 대화!'} (호감 ${rel})` : '';
   });
@@ -623,7 +658,8 @@ function updateNPCs() {
 
 function collectResources() {
   state.objects = state.objects.filter((o) => {
-    if (dist(state.player, o) < 22) {
+    const pickupR = o.type === 'shell' ? 34 : 22;
+    if (dist(state.player, o) < pickupR) {
       state.inv[o.type] += 1;
       state.xp += 3;
       setMsg(`${o.type} 획득!`);
@@ -1093,7 +1129,14 @@ function playerMove() {
   } else {
     const nx = clamp(state.player.x + dx, 16, WORLD_W - 16);
     const ny = clamp(state.player.y + dy, 16, WORLD_H - 16);
-    if (isWalkable(nx, ny)) { state.player.x = nx; state.player.y = ny; }
+    if (isWalkable(nx, ny)) {
+      state.player.x = nx; state.player.y = ny;
+      if (tileAt(nx, ny).b !== 'water') { state.player.lastSafeX = nx; state.player.lastSafeY = ny; }
+    } else if (tileAt(state.player.x, state.player.y).b === 'water' && !onBridge(state.player.x, state.player.y)) {
+      state.player.x = state.player.lastSafeX;
+      state.player.y = state.player.lastSafeY;
+      setMsg('물이 너무 깊어요! 안전지대로 이동합니다.');
+    }
   }
 
   if ((dx || dy) && state.renderMode === '3d' && !state.house.inside) {
@@ -1833,7 +1876,18 @@ function updateUI() {
   const ach = state.achievements;
   ui.achievements.innerHTML = `다리장인: ${ach.bridgeMaster ? '✅' : '⬜'}<br>큐레이터: ${ach.museum10 ? '✅' : '⬜'}<br>베스트프렌드: ${ach.relation90 ? '✅' : '⬜'}`;
   ui.log.innerHTML = state.logs.map((l) => `• ${l}`).join('<br>');
-  ui.message.textContent = state.msgTimer > 0 ? state.msg : '';
+  const shopDoor = { x: SHOP_PLOT.x + 92, y: SHOP_PLOT.y + 102 };
+  const museumDoor = { x: MUSEUM_PLOT.x + 106, y: MUSEUM_PLOT.y + 110 };
+  state.prompt = '';
+  if (state.house.tier > 0 && dist(state.player, { x: state.house.doorX, y: state.house.doorY }) < 66) state.prompt = 'E: 집 출입';
+  else if (dist(state.player, shopDoor) < 70) state.prompt = 'E: 상점 이용';
+  else if (dist(state.player, museumDoor) < 74) state.prompt = 'E: 박물관 이용';
+  else {
+    const nearNpc = state.npcs.find((n) => dist(state.player, n) < 82);
+    if (nearNpc) state.prompt = `E: ${nearNpc.name}와 대화`;
+  }
+
+  ui.message.textContent = state.prompt || (state.msgTimer > 0 ? state.msg : '');
 
   if (state.dialogue && state.renderMode === '3d') {
     ui.dialogueUi.classList.remove('hidden');
@@ -1841,9 +1895,9 @@ function updateUI() {
       <div class="name">💬 ${state.dialogue.npc.name}</div>
       <div class="line">${state.dialogue.npc.talk || `${state.dialogue.npc.name}: 무슨 이야기 할까?`}</div>
       <div class="choices">
-        <div>1) ${state.dialogue.a}</div>
-        <div>2) ${state.dialogue.b}</div>
-        <div>Esc) 대화 종료</div>
+        <button data-choice="1">1) ${state.dialogue.a}</button>
+        <button data-choice="2">2) ${state.dialogue.b}</button>
+        <button data-choice="0">Esc) 대화 종료</button>
       </div>`;
   } else {
     ui.dialogueUi.classList.add('hidden');
@@ -1944,6 +1998,14 @@ ui.btnShop.textContent = '🛒 상점(E 근처 입장)';
 ui.btnMuseum.textContent = '🏛️ 박물관(E 근처 입장)';
 ui.modalClose.addEventListener('click', closeModal);
 ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModal(); });
+ui.dialogueUi.addEventListener('click', (e) => {
+  const btn = e.target.closest('[data-choice]');
+  if (!btn) return;
+  const c = btn.getAttribute('data-choice');
+  if (c === '1') handleDialogueChoice(1);
+  else if (c === '2') handleDialogueChoice(2);
+  else closeDialogue();
+});
 
 loadGame();
 calcDailyShopStock();

@@ -52,6 +52,15 @@ canvas { width: 100%; height: auto; border-radius: 12px; border: 1px solid rgba(
 .dialogue-ui .name { font-weight: 900; color: #93c5fd; margin-bottom: 6px; }
 .dialogue-ui .line { font-weight: 700; margin-bottom: 8px; }
 .dialogue-ui .choices { display: grid; gap: 6px; font-size: 0.95rem; }
+.dialogue-ui .choices button {
+  text-align: left;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid rgba(255,255,255,0.18);
+  background: rgba(30, 41, 59, 0.72);
+  color: #f8fafc;
+}
+.dialogue-ui .choices button:hover { filter: brightness(1.08); }
 
 .modal { position: fixed; inset: 0; background: rgba(0,0,0,0.35); display: grid; place-items: center; }
 .modal.hidden { display: none !important; }
