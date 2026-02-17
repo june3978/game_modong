@@ -6,6 +6,7 @@ const ui = {
   inventory: document.getElementById('inventory'),
   quest: document.getElementById('quest'),
   relations: document.getElementById('relations'),
+  achievements: document.getElementById('achievements'),
   log: document.getElementById('log'),
   message: document.getElementById('message'),
   fishingUi: document.getElementById('fishingUi'),
@@ -17,6 +18,7 @@ const ui = {
   btnShop: document.getElementById('btnShop'),
   btnBuild: document.getElementById('btnBuild'),
   btnTown: document.getElementById('btnTown'),
+  btnMuseum: document.getElementById('btnMuseum'),
 };
 
 const TILE = 48;
@@ -25,12 +27,12 @@ const MAP_H = 32;
 const WORLD_W = MAP_W * TILE;
 const WORLD_H = MAP_H * TILE;
 
-const ITEMS = [['wood', '🪵'], ['flower', '🌸'], ['berry', '🫐'], ['shell', '🐚'], ['fish', '🐟'], ['seed', '🌱'], ['furniture', '🪑']];
+const ITEMS = [['wood', '🪵'], ['flower', '🌸'], ['berry', '🫐'], ['shell', '🐚'], ['fish', '🐟'], ['bug', '🦋'], ['seed', '🌱'], ['furniture', '🪑']];
 const SEASONS = ['봄', '여름', '가을', '겨울'];
 const EVENTS = ['낚시 대잔치', '꽃 축제', '시장 오픈', '고요한 밤'];
 
 const WATER = { x1: 31, x2: 46, y1: 8, y2: 23 };
-const BRIDGE = { x1: 36, x2: 40, y: 15 };
+const BRIDGE = { x1: 32, x2: 44, y: 15 };
 const HOUSE_PLOT = { x: 470, y: 520, w: 180, h: 140 };
 const FARM = { x: 240, y: 560, w: 180, h: 120 };
 
@@ -52,14 +54,14 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: '고도화 2단계: 관계도/이벤트/상점 로테이션/인테리어 편집',
+  msg: '고도화 5단계: 긴 다리 + 박물관 + 업적 + 곤충채집',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
   level: 1,
   xp: 0,
   player: { x: 420, y: 420, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false },
-  inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, seed: 2, furniture: 0 },
+  inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, bug: 0, seed: 2, furniture: 0 },
   objects: [],
   fishes: [],
   crops: [],
@@ -89,8 +91,10 @@ const state = {
   questIndex: 0,
   questDone: false,
   shopStock: { seedpackPrice: 20, furniturePrice: 55, fishPrice: 15 },
+  museum: { fish: 0, bug: 0, shell: 0, flower: 0 },
+  achievements: { bridgeMaster: false, museum10: false, relation90: false },
   decorScore: 0,
-  version: 'v0.4',
+  version: 'v0.5',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -147,6 +151,50 @@ function rollResidentRequests() {
   });
 }
 
+function catchBugAction() {
+  const chance = 0.55 + (state.dailyEvent === '꽃 축제' ? 0.2 : 0);
+  if (Math.random() < chance) {
+    state.inv.bug += 1;
+    state.xp += 9;
+    setMsg('곤충 채집 성공! bug +1');
+    addLog('곤충 채집 성공');
+  } else {
+    setMsg('곤충이 날아갔어요!');
+  }
+}
+
+function donateToMuseum(kind) {
+  if ((state.inv[kind] || 0) <= 0) {
+    setMsg(`${kind} 기증할 재료가 부족해요.`);
+    return;
+  }
+  state.inv[kind] -= 1;
+  state.museum[kind] = (state.museum[kind] || 0) + 1;
+  state.coins += 10;
+  state.xp += 7;
+  addLog(`박물관 기증: ${kind}`);
+  setMsg(`박물관 기증 완료 (${kind}) +10 코인`);
+}
+
+function checkAchievements() {
+  if (state.bridgeBuilt && !state.achievements.bridgeMaster) {
+    state.achievements.bridgeMaster = true;
+    state.coins += 40;
+    addLog('업적 달성: 다리 장인 (+40)');
+  }
+  const museumTotal = Object.values(state.museum).reduce((a,b)=>a+b,0);
+  if (museumTotal >= 10 && !state.achievements.museum10) {
+    state.achievements.museum10 = true;
+    state.coins += 70;
+    addLog('업적 달성: 큐레이터 (+70)');
+  }
+  if (Object.values(state.relationships).some(v => v >= 90) && !state.achievements.relation90) {
+    state.achievements.relation90 = true;
+    state.coins += 60;
+    addLog('업적 달성: 베스트 프렌드 (+60)');
+  }
+}
+
 function saveGame() {
   const snapshot = {
     day: state.day,
@@ -165,6 +213,8 @@ function saveGame() {
     relationships: state.relationships,
     residentRequests: state.residentRequests,
     shopStock: state.shopStock,
+    museum: state.museum,
+    achievements: state.achievements,
     player: { x: state.player.x, y: state.player.y },
   };
   localStorage.setItem('healing_island_save_v3', JSON.stringify(snapshot));
@@ -191,6 +241,8 @@ function loadGame() {
     state.relationships = { ...state.relationships, ...(s.relationships || {}) };
     state.residentRequests = { ...state.residentRequests, ...(s.residentRequests || {}) };
     state.shopStock = { ...state.shopStock, ...(s.shopStock || {}) };
+    state.museum = { ...state.museum, ...(s.museum || {}) };
+    state.achievements = { ...state.achievements, ...(s.achievements || {}) };
     if (s.player) {
       state.player.x = s.player.x ?? state.player.x;
       state.player.y = s.player.y ?? state.player.y;
@@ -779,7 +831,8 @@ function openShop() {
   <div class="shop-item"><span>집 업그레이드 (250 코인)</span><button data-shop="upgrade">업그레이드</button></div>
   <div class="shop-item"><span>꽃씨 패키지 (${state.shopStock.seedpackPrice} 코인)</span><button data-shop="seedpack">구매</button></div>
   <div class="shop-item"><span>기성 가구 (${state.shopStock.furniturePrice} 코인)</span><button data-shop="furniture">구매</button></div>
-  <div class="shop-item"><span>물고기 판매 (${state.shopStock.fishPrice} 코인/개)</span><button data-shop="sellfish">판매</button></div>`;
+  <div class="shop-item"><span>물고기 판매 (${state.shopStock.fishPrice} 코인/개)</span><button data-shop="sellfish">판매</button></div>
+  <div class="shop-item"><span>곤충 판매 (${Math.floor(state.shopStock.fishPrice*0.8)} 코인/개)</span><button data-shop="sellbug">판매</button></div>`;
   openModal('상점(일일 변동)', html);
   bindModalActions();
 }
@@ -814,11 +867,24 @@ function openTownBoard() {
   openModal('마을 보드', html);
 }
 
+function openMuseum() {
+  const total = Object.values(state.museum).reduce((a,b)=>a+b,0);
+  const html = `
+  <div class="shop-item"><span>기증 현황</span><span>총 ${total}점</span></div>
+  <div class="shop-item"><span>fish ${state.museum.fish}</span><button data-museum="fish">기증</button></div>
+  <div class="shop-item"><span>bug ${state.museum.bug}</span><button data-museum="bug">기증</button></div>
+  <div class="shop-item"><span>shell ${state.museum.shell}</span><button data-museum="shell">기증</button></div>
+  <div class="shop-item"><span>flower ${state.museum.flower}</span><button data-museum="flower">기증</button></div>`;
+  openModal('박물관', html);
+  bindModalActions();
+}
+
 function bindModalActions() {
   ui.modalBody.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
       const c = btn.dataset.craft;
       const s = btn.dataset.shop;
+      const m = btn.dataset.museum;
 
       if (c === 'chair') {
         if (state.inv.wood >= 4 && state.inv.flower >= 2) {
@@ -865,6 +931,9 @@ function bindModalActions() {
         if (state.coins >= state.shopStock.furniturePrice) { state.coins -= state.shopStock.furniturePrice; state.inv.furniture += 1; setMsg('기성 가구 구매 완료.'); }
         else setMsg('코인이 부족합니다.');
       }
+      if (m) {
+        donateToMuseum(m);
+      }
       if (s === 'sellfish') {
         if (state.inv.fish <= 0) setMsg('판매할 물고기가 없습니다.');
         else {
@@ -872,6 +941,16 @@ function bindModalActions() {
           state.coins += earn;
           state.inv.fish = 0;
           setMsg(`물고기 판매 완료! +${earn} 코인`);
+        }
+      }
+      if (s === 'sellbug') {
+        if (state.inv.bug <= 0) setMsg('판매할 곤충이 없습니다.');
+        else {
+          const unit = Math.floor(state.shopStock.fishPrice * 0.8);
+          const earn = state.inv.bug * unit;
+          state.coins += earn;
+          state.inv.bug = 0;
+          setMsg(`곤충 판매 완료! +${earn} 코인`);
         }
       }
 
@@ -980,6 +1059,8 @@ function updateUI() {
   ui.relations.innerHTML = Object.entries(state.relationships)
     .map(([k, v]) => `${k}: ${v}`)
     .join('<br>');
+  const ach = state.achievements;
+  ui.achievements.innerHTML = `다리장인: ${ach.bridgeMaster ? '✅' : '⬜'}<br>큐레이터: ${ach.museum10 ? '✅' : '⬜'}<br>베스트프렌드: ${ach.relation90 ? '✅' : '⬜'}`;
   ui.log.innerHTML = state.logs.map((l) => `• ${l}`).join('<br>');
   ui.message.textContent = state.msgTimer > 0 ? state.msg : '';
 }
@@ -1008,6 +1089,7 @@ function tick() {
   updateEconomyAndLevel();
   maybeProgressQuest();
   updateCalendar();
+  checkAchievements();
   updateUI();
 
   requestAnimationFrame(tick);
@@ -1035,6 +1117,7 @@ window.addEventListener('keydown', (e) => {
   if (key === 'e') { interact(); return; }
   if (key === 'f') { placeFurniture(); return; }
   if (key === 'r') { handleFarmAction(); return; }
+  if (key === 'g') { catchBugAction(); return; }
   state.keys.add(key);
 });
 
@@ -1047,6 +1130,7 @@ ui.btnCraft.addEventListener('click', openCraft);
 ui.btnShop.addEventListener('click', openShop);
 ui.btnBuild.addEventListener('click', openBuild);
 ui.btnTown.addEventListener('click', openTownBoard);
+ui.btnMuseum.addEventListener('click', openMuseum);
 ui.modalClose.addEventListener('click', closeModal);
 ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModal(); });
 
