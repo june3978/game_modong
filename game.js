@@ -10,6 +10,7 @@ const ui = {
   achievements: document.getElementById('achievements'),
   log: document.getElementById('log'),
   message: document.getElementById('message'),
+  dialogueUi: document.getElementById('dialogueUi'),
   fishingUi: document.getElementById('fishingUi'),
   modal: document.getElementById('modal'),
   modalTitle: document.getElementById('modalTitle'),
@@ -58,7 +59,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v1.7: 렌더러/건물 품질 패스 강화',
+  msg: 'v1.8: 3D 조작/대화/방향 동기화 개선',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -101,7 +102,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v1.7',
+  version: 'v1.8',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -553,6 +554,13 @@ function facingTo(a, b) {
   return a.y < b.y ? 'down' : 'up';
 }
 
+function facingToYaw(facing = 'down') {
+  if (facing === 'up') return Math.PI;
+  if (facing === 'left') return Math.PI * 0.5;
+  if (facing === 'right') return -Math.PI * 0.5;
+  return 0;
+}
+
 function updateCamera() {
   state.camera.x = clamp(state.player.x - canvas.width / 2, 0, WORLD_W - canvas.width);
   state.camera.y = clamp(state.player.y - canvas.height / 2, 0, WORLD_H - canvas.height);
@@ -593,8 +601,19 @@ function updateNPCs() {
       const spd = n.state === 'idle' ? 0.6 : 1.15;
       const nx = n.x + (dx / d) * spd;
       const ny = n.y + (dy / d) * spd;
-      if (isWalkable(nx, ny) || n.state === 'fish') { n.x = nx; n.y = ny; }
+      if (isWalkable(nx, ny) || n.state === 'fish') {
+        n.vx = nx - n.x;
+        n.vy = ny - n.y;
+        n.x = nx;
+        n.y = ny;
+      } else {
+        n.vx = 0;
+        n.vy = 0;
+      }
       n.facing = facingTo(n, n.target);
+    } else {
+      n.vx = 0;
+      n.vy = 0;
     }
 
     const rel = state.relationships[n.id] || 0;
@@ -1039,15 +1058,15 @@ function playerMove() {
   const right = state.keys.has('ArrowRight') || state.keys.has('d');
 
   if (state.renderMode === '3d' && !state.house.inside) {
-    const fx = Math.cos(state.camera3d.yaw);
-    const fy = Math.sin(state.camera3d.yaw);
-    const rx = Math.cos(state.camera3d.yaw + Math.PI / 2);
-    const ry = Math.sin(state.camera3d.yaw + Math.PI / 2);
+    const fx = -Math.cos(state.camera3d.yaw);
+    const fy = -Math.sin(state.camera3d.yaw);
+    const rx = -fy;
+    const ry = fx;
 
     if (up) { dx += fx * spd; dy += fy * spd; }
     if (down) { dx -= fx * spd; dy -= fy * spd; }
-    if (left) { dx += rx * spd; dy += ry * spd; }
-    if (right) { dx -= rx * spd; dy -= ry * spd; }
+    if (left) { dx -= rx * spd; dy -= ry * spd; }
+    if (right) { dx += rx * spd; dy += ry * spd; }
   } else {
     if (up) { dy -= spd; state.player.facing = 'up'; }
     if (down) { dy += spd; state.player.facing = 'down'; }
@@ -1695,6 +1714,7 @@ function sync3DEntities() {
 
   const p = to3D(state.player.x, state.player.y);
   render3d.player.position.set(p.x, 0.25, p.z);
+  render3d.player.rotation.y = facingToYaw(state.player.facing);
   animateRigCharacter(render3d.player, state.time * 0.016, state.keys.size > 0);
 
   state.npcs.forEach((npc, i) => {
@@ -1702,6 +1722,7 @@ function sync3DEntities() {
     if (!mesh) return;
     const n = to3D(npc.x, npc.y);
     mesh.position.set(n.x, 0.25, n.z);
+    mesh.rotation.y = facingToYaw(npc.facing || 'down');
     const npcMoving = Math.abs(npc.vx || 0) + Math.abs(npc.vy || 0) > 0.05;
     animateRigCharacter(mesh, state.time * 0.016 + i * 0.7, npcMoving);
   });
@@ -1790,6 +1811,7 @@ function updateUI() {
     models: { ...render3d.modelStats },
     mode: state.renderMode,
     note: 'PolyHaven 우선 로딩 + 백업 텍스처 체인 사용',
+    player: { x: Number(state.player.x.toFixed(2)), y: Number(state.player.y.toFixed(2)), facing: state.player.facing },
   };
 
   const t = (Math.sin(state.time * 0.0023) + 1) / 2;
@@ -1812,6 +1834,21 @@ function updateUI() {
   ui.achievements.innerHTML = `다리장인: ${ach.bridgeMaster ? '✅' : '⬜'}<br>큐레이터: ${ach.museum10 ? '✅' : '⬜'}<br>베스트프렌드: ${ach.relation90 ? '✅' : '⬜'}`;
   ui.log.innerHTML = state.logs.map((l) => `• ${l}`).join('<br>');
   ui.message.textContent = state.msgTimer > 0 ? state.msg : '';
+
+  if (state.dialogue && state.renderMode === '3d') {
+    ui.dialogueUi.classList.remove('hidden');
+    ui.dialogueUi.innerHTML = `
+      <div class="name">💬 ${state.dialogue.npc.name}</div>
+      <div class="line">${state.dialogue.npc.talk || `${state.dialogue.npc.name}: 무슨 이야기 할까?`}</div>
+      <div class="choices">
+        <div>1) ${state.dialogue.a}</div>
+        <div>2) ${state.dialogue.b}</div>
+        <div>Esc) 대화 종료</div>
+      </div>`;
+  } else {
+    ui.dialogueUi.classList.add('hidden');
+    ui.dialogueUi.innerHTML = '';
+  }
 }
 
 function tick() {
@@ -1862,7 +1899,7 @@ async function toggleRenderMode() {
 window.addEventListener('keydown', (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
-  if (state.dialogue) {
+  if (state.dialogue && state.renderMode === '3d') {
     if (key === '1') return handleDialogueChoice(1);
     if (key === '2') return handleDialogueChoice(2);
     if (key === 'escape') return closeDialogue();
