@@ -56,7 +56,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v1.0: PBR 조명/그림자 기반 3D 렌더 업그레이드',
+  msg: 'v1.1: 프리 텍스처/모델 월드 밀도 업그레이드',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -99,7 +99,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v1.0',
+  version: 'v1.1',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -112,6 +112,7 @@ const render3d = {
   loading: false,
   canvas: null,
   ctx: null,
+  props: [],
 };
 
 function setMsg(text, t = 170) { state.msg = text; state.msgTimer = t; }
@@ -1126,11 +1127,30 @@ function createNoiseTexture(base = '#6fa86a', accent = '#4f7f49', size = 256, sc
   return tex;
 }
 
+function createRemoteTexture(url, repeat = [1, 1]) {
+  const fallback = createNoiseTexture('#8aa08a', '#6d826d', 128, 0.12);
+  fallback.repeat.set(repeat[0], repeat[1]);
+  const loader = new THREE.TextureLoader();
+  loader.load(
+    url,
+    (tex) => {
+      tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+      tex.repeat.set(repeat[0], repeat[1]);
+      tex.colorSpace = THREE.SRGBColorSpace;
+      fallback.image = tex.image;
+      fallback.needsUpdate = true;
+    },
+    undefined,
+    () => {},
+  );
+  return fallback;
+}
+
 function createWorldMaterials() {
-  const grassTex = createNoiseTexture('#7fae6e', '#5f8d4e', 256, 0.22);
-  const dirtTex = createNoiseTexture('#8f7858', '#6c573f', 256, 0.2);
-  const woodTex = createNoiseTexture('#816447', '#5f452f', 256, 0.16);
-  const roofTex = createNoiseTexture('#7f2d2d', '#5f1d1d', 256, 0.12);
+  const grassTex = createRemoteTexture('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_diff_1k.jpg', [12, 12]);
+  const dirtTex = createRemoteTexture('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground_diff_1k.jpg', [10, 10]);
+  const woodTex = createRemoteTexture('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_diff_1k.jpg', [4, 4]);
+  const roofTex = createRemoteTexture('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_diff_1k.jpg', [3, 3]);
 
   return {
     grass: new THREE.MeshStandardMaterial({ map: grassTex, roughness: 0.95, metalness: 0.02 }),
@@ -1147,6 +1167,51 @@ function createWorldMaterials() {
     npc: new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.7 }),
     player: new THREE.MeshStandardMaterial({ color: '#3b82f6', roughness: 0.65 }),
   };
+}
+
+async function loadFreeWorldProps() {
+  if (!window.THREE || !window.THREE.GLTFLoader || !render3d.world) return;
+  const loader = new THREE.GLTFLoader();
+  const specs = [
+    {
+      url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Avocado/glTF-Binary/Avocado.glb',
+      pos: [-10, 0.35, -6],
+      rotY: 0.8,
+      scale: 8,
+    },
+    {
+      url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/WaterBottle/glTF-Binary/WaterBottle.glb',
+      pos: [9, 0.3, -8],
+      rotY: -0.3,
+      scale: 5,
+    },
+    {
+      url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/BoomBox/glTF-Binary/BoomBox.glb',
+      pos: [12, 0.3, 8],
+      rotY: 0.5,
+      scale: 18,
+    },
+  ];
+
+  const loadOne = (spec) => new Promise((resolve) => {
+    loader.load(spec.url, (gltf) => {
+      const model = gltf.scene;
+      model.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
+      model.rotation.y = spec.rotY;
+      model.scale.setScalar(spec.scale);
+      model.traverse((obj) => {
+        if (obj.isMesh) {
+          obj.castShadow = true;
+          obj.receiveShadow = true;
+        }
+      });
+      render3d.world.add(model);
+      render3d.props.push(model);
+      resolve();
+    }, undefined, () => resolve());
+  });
+
+  await Promise.all(specs.map(loadOne));
 }
 
 function createCharacterMesh(material, scale = 1) {
@@ -1296,6 +1361,7 @@ async function ensure3DWorld() {
     render3d.sun = sun;
 
     buildThreeWorld();
+    await loadFreeWorldProps();
     render3d.ready = true;
     resize3DRenderer();
   } catch (err) {
