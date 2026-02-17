@@ -9,6 +9,7 @@ const ui = {
   relations: document.getElementById('relations'),
   achievements: document.getElementById('achievements'),
   log: document.getElementById('log'),
+  worldMapMini: document.getElementById('worldMapMini'),
   message: document.getElementById('message'),
   dialogueUi: document.getElementById('dialogueUi'),
   fishingUi: document.getElementById('fishingUi'),
@@ -22,11 +23,12 @@ const ui = {
   btnBuild: document.getElementById('btnBuild'),
   btnTown: document.getElementById('btnTown'),
   btnMuseum: document.getElementById('btnMuseum'),
+  btnMap: document.getElementById('btnMap'),
 };
 
 const TILE = 48;
-const MAP_W = 54;
-const MAP_H = 32;
+const MAP_W = 96;
+const MAP_H = 96;
 const WORLD_W = MAP_W * TILE;
 const WORLD_H = MAP_H * TILE;
 
@@ -36,14 +38,24 @@ const EVENTS = ['낚시 대잔치', '꽃 축제', '시장 오픈', '고요한 �
 
 const WATER = { x1: 31, x2: 46, y1: 8, y2: 23 };
 const BRIDGE = { x1: 32, x2: 44, y: 15 };
-const HOUSE_PLOT = { x: 470, y: 520, w: 180, h: 140 };
-const FARM = { x: 240, y: 560, w: 180, h: 120 };
-const SHOP_PLOT = { x: 980, y: 500, w: 180, h: 130 };
-const MUSEUM_PLOT = { x: 1120, y: 290, w: 210, h: 145 };
-const FOUNTAIN = { x: 760, y: 520 };
-const CAMPFIRE = { x: 660, y: 640 };
-const LOOKOUT = { x: 1320, y: 420 };
+const HOUSE_PLOT = { x: 900, y: 1180, w: 180, h: 140 };
+const FARM = { x: 640, y: 1240, w: 220, h: 140 };
+const SHOP_PLOT = { x: 1480, y: 1140, w: 190, h: 140 };
+const MUSEUM_PLOT = { x: 1700, y: 900, w: 240, h: 150 };
+const FOUNTAIN = { x: 1240, y: 1140 };
+const CAMPFIRE = { x: 1140, y: 1340 };
+const LOOKOUT = { x: 2060, y: 980 };
 const PIER = { x: (WATER.x1 + 1) * TILE, y: BRIDGE.y * TILE + 60 };
+const WORLD_RADIUS = Math.min(WORLD_W, WORLD_H) * 0.46;
+
+const NPC_HOMES = [
+  { id: 'luna', x: 1120, y: 1060, color: '#ef9a6f' },
+  { id: 'bomi', x: 1360, y: 1240, color: '#6cb0f3' },
+  { id: 'maru', x: 1860, y: 1320, color: '#8fd18b' },
+  { id: 'nari', x: 940, y: 1460, color: '#d7a5f6' },
+  { id: 'toto', x: 1620, y: 1480, color: '#f4cc6a' },
+  { id: 'pipi', x: 2080, y: 1160, color: '#95e2d4' },
+];
 
 const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   Array.from({ length: MAP_W }, (_, gx) => {
@@ -63,14 +75,14 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v2.0: 그래픽/상점·상호작용 20+20 패스',
+  msg: 'v2.1: 둥근 무한 월드 + 지도/주민 구역 확장',
   msgTimer: 280,
   prompt: '',
   logs: ['게임 시작'],
   coins: 110,
   level: 1,
   xp: 0,
-  player: { x: 420, y: 420, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false, lastSafeX: 420, lastSafeY: 420 },
+  player: { x: 960, y: 1120, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false, lastSafeX: 960, lastSafeY: 1120 },
   inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, bug: 0, seed: 2, furniture: 0 },
   objects: [],
   fishes: [],
@@ -88,8 +100,8 @@ const state = {
     tier: 0,
     inside: false,
     furniture: [],
-    doorX: 520,
-    doorY: 560,
+    doorX: HOUSE_PLOT.x + 90,
+    doorY: HOUSE_PLOT.y + 84,
     editor: { selected: 0 },
     interiorPlayer: { x: 640, y: 560 },
   },
@@ -107,15 +119,51 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v2.0',
+  version: 'v2.1',
   buffs: { fish: 0, bug: 0, harvest: 0, discount: 0 },
   interactionFlags: {},
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function rnd(min, max) { return Math.random() * (max - min) + min; }
-function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
-function worldToScreen(x, y) { return { x: x - state.camera.x, y: y - state.camera.y }; }
+function dist(a, b) { return worldDistance(a, b); }
+
+function wrapAxis(v, max) {
+  const m = ((v % max) + max) % max;
+  return m;
+}
+
+function wrapWorldPoint(p) {
+  p.x = wrapAxis(p.x, WORLD_W);
+  p.y = wrapAxis(p.y, WORLD_H);
+}
+
+function circularDelta(v, ref, max) {
+  let d = v - ref;
+  if (d > max / 2) d -= max;
+  if (d < -max / 2) d += max;
+  return d;
+}
+
+function worldDistance(a, b) {
+  const dx = circularDelta(a.x, b.x, WORLD_W);
+  const dy = circularDelta(a.y, b.y, WORLD_H);
+  return Math.hypot(dx, dy);
+}
+
+function worldToScreen(x, y) {
+  return {
+    x: circularDelta(x, state.camera.x, WORLD_W) + canvas.width / 2,
+    y: circularDelta(y, state.camera.y, WORLD_H) + canvas.height / 2,
+  };
+}
+
+function wrappedPointNear(ref, pt) {
+  return {
+    x: ref.x + circularDelta(pt.x, ref.x, WORLD_W),
+    y: ref.y + circularDelta(pt.y, ref.y, WORLD_H),
+  };
+}
 
 const render3d = {
   ready: false,
@@ -147,8 +195,8 @@ function calcDecorScore() {
 }
 
 function tileAt(x, y) {
-  const gx = Math.floor(clamp(x, 0, WORLD_W - 1) / TILE);
-  const gy = Math.floor(clamp(y, 0, WORLD_H - 1) / TILE);
+  const gx = Math.floor(wrapAxis(x, WORLD_W) / TILE);
+  const gy = Math.floor(wrapAxis(y, WORLD_H) / TILE);
   return { gx, gy, b: biomes[gy]?.[gx] || 'grass' };
 }
 
@@ -186,11 +234,11 @@ function calcDailyShopStock() {
 
 function rollResidentRequests() {
   const pool = ['flower', 'wood', 'berry', 'fish', 'shell'];
-  ['luna', 'bomi', 'maru'].forEach((id, idx) => {
+  NPC_HOMES.forEach((home, idx) => {
     const pick = pool[(state.day + idx + state.season) % pool.length];
     const need = pick === 'fish' ? 2 : 3;
-    const reward = 35 + need * 10 + idx * 5;
-    state.residentRequests[id] = { item: pick, need, reward, doneDay: 0 };
+    const reward = 35 + need * 10 + idx * 4;
+    state.residentRequests[home.id] = { item: pick, need, reward, doneDay: 0 };
   });
 }
 
@@ -326,16 +374,36 @@ function spawnFish() {
 }
 
 function initNPCs() {
-  state.npcs = [
-    { id: 'luna', name: '루나', x: 820, y: 690, color: '#f59e0b', mood: 84, state: 'wander', target: null, pause: false, talk: '' },
-    { id: 'bomi', name: '보미', x: 1020, y: 620, color: '#22c55e', mood: 80, state: 'farm', target: null, pause: false, talk: '' },
-    { id: 'maru', name: '마루', x: 1430, y: 760, color: '#60a5fa', mood: 82, state: 'fish', target: null, pause: false, talk: '' },
-  ];
+  const names = {
+    luna: '루나',
+    bomi: '보미',
+    maru: '마루',
+    nari: '나리',
+    toto: '토토',
+    pipi: '피피',
+  };
+  state.relationships = NPC_HOMES.reduce((acc, h) => {
+    acc[h.id] = state.relationships[h.id] ?? 20;
+    return acc;
+  }, {});
+  state.npcs = NPC_HOMES.map((h, idx) => ({
+    id: h.id,
+    name: names[h.id] || h.id,
+    x: h.x + rnd(-18, 18),
+    y: h.y + rnd(32, 56),
+    home: { x: h.x, y: h.y },
+    color: h.color,
+    mood: 80 + (idx % 3) * 3,
+    state: h.id === 'maru' ? 'fish' : 'wander',
+    target: null,
+    pause: false,
+    talk: '',
+  }));
 
   state.npcs.forEach((n) => {
     if (tileAt(n.x, n.y).b === 'water' && n.id !== 'maru') {
-      n.x = HOUSE_PLOT.x + 60 + Math.random() * 80;
-      n.y = HOUSE_PLOT.y + 80 + Math.random() * 50;
+      n.x = n.home.x;
+      n.y = n.home.y + 40;
     }
     n.vx = 0;
     n.vy = 0;
@@ -350,16 +418,19 @@ function drawWorld() {
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  const sx = Math.floor(state.camera.x / TILE);
-  const sy = Math.floor(state.camera.y / TILE);
-  const ex = sx + Math.ceil(canvas.width / TILE) + 2;
-  const ey = sy + Math.ceil(canvas.height / TILE) + 2;
+  const halfX = Math.ceil(canvas.width / TILE / 2) + 2;
+  const halfY = Math.ceil(canvas.height / TILE / 2) + 2;
+  const centerGX = Math.floor(state.camera.x / TILE);
+  const centerGY = Math.floor(state.camera.y / TILE);
 
-  for (let gy = sy; gy < ey; gy++) {
-    for (let gx = sx; gx < ex; gx++) {
-      if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) continue;
+  for (let oy = -halfY; oy <= halfY; oy++) {
+    for (let ox = -halfX; ox <= halfX; ox++) {
+      const gx = wrapAxis(centerGX + ox, MAP_W);
+      const gy = wrapAxis(centerGY + oy, MAP_H);
       const b = biomes[gy][gx];
-      const p = worldToScreen(gx * TILE, gy * TILE);
+      const wx = (centerGX + ox) * TILE;
+      const wy = (centerGY + oy) * TILE;
+      const p = worldToScreen(wx, wy);
       drawTile2D(p.x, p.y, b);
     }
   }
@@ -367,7 +438,34 @@ function drawWorld() {
   drawFarmArea();
   if (state.bridgeBuilt) drawBridge();
   drawHouseExterior();
+  drawNpcHomes2D();
   drawInteractionPOIs();
+
+  const horizon = Math.min(canvas.width, canvas.height) * 0.52;
+  const grad = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, horizon * 0.82, canvas.width / 2, canvas.height / 2, horizon * 1.25);
+  grad.addColorStop(0, "rgba(255,255,255,0)");
+  grad.addColorStop(1, "rgba(9,14,23,0.46)");
+  ctx.fillStyle = grad;
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+}
+
+function drawNpcHomes2D() {
+  NPC_HOMES.forEach((h) => {
+    const p = worldToScreen(h.x, h.y);
+    const sx = p.x - 28;
+    const sy = p.y - 34;
+    ctx.fillStyle = 'rgba(255,255,255,0.9)';
+    ctx.fillRect(sx, sy, 56, 42);
+    ctx.fillStyle = '#f97316';
+    ctx.beginPath();
+    ctx.moveTo(sx - 4, sy);
+    ctx.lineTo(sx + 28, sy - 18);
+    ctx.lineTo(sx + 60, sy);
+    ctx.closePath();
+    ctx.fill();
+    ctx.fillStyle = '#334155';
+    ctx.fillRect(sx + 22, sy + 20, 12, 22);
+  });
 }
 
 function drawInteractionPOIs() {
@@ -610,8 +708,8 @@ function facingToYaw(facing = 'down') {
 }
 
 function updateCamera() {
-  state.camera.x = clamp(state.player.x - canvas.width / 2, 0, WORLD_W - canvas.width);
-  state.camera.y = clamp(state.player.y - canvas.height / 2, 0, WORLD_H - canvas.height);
+  state.camera.x = wrapAxis(state.player.x, WORLD_W);
+  state.camera.y = wrapAxis(state.player.y, WORLD_H);
 }
 
 function updateFish() {
@@ -638,13 +736,13 @@ function updateNPCs() {
     if (!n.target || dist(n, n.target) < 20) {
       if (n.state === 'fish') n.target = { x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE), y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE) };
       else if (n.state === 'farm') n.target = { x: FARM.x + rnd(10, FARM.w - 10), y: FARM.y + rnd(10, FARM.h - 10) };
-      else if (n.state === 'social') n.target = { x: HOUSE_PLOT.x + rnd(20, 160), y: HOUSE_PLOT.y + rnd(20, 120) };
-      else if (n.state === 'idle') n.target = { x: HOUSE_PLOT.x + 90, y: HOUSE_PLOT.y + 90 };
-      else n.target = { x: rnd(80, WORLD_W - 80), y: rnd(80, WORLD_H - 80) };
+      else if (n.state === 'social') n.target = { x: n.home.x + rnd(-90, 90), y: n.home.y + rnd(-80, 110) };
+      else if (n.state === 'idle') n.target = { x: n.home.x + rnd(-20, 20), y: n.home.y + 34 };
+      else n.target = { x: wrapAxis(n.home.x + rnd(-480, 480), WORLD_W), y: wrapAxis(n.home.y + rnd(-360, 360), WORLD_H) };
     }
 
-    const dx = n.target.x - n.x;
-    const dy = n.target.y - n.y;
+    const dx = circularDelta(n.target.x, n.x, WORLD_W);
+    const dy = circularDelta(n.target.y, n.y, WORLD_H);
     const d = Math.hypot(dx, dy);
     if (d > 1) {
       const spd = n.state === 'idle' ? 0.6 : 1.15;
@@ -653,8 +751,8 @@ function updateNPCs() {
       if (isWalkable(nx, ny) || n.state === 'fish') {
         n.vx = nx - n.x;
         n.vy = ny - n.y;
-        n.x = nx;
-        n.y = ny;
+        n.x = wrapAxis(nx, WORLD_W);
+        n.y = wrapAxis(ny, WORLD_H);
       } else {
         n.vx = 0;
         n.vy = 0;
@@ -666,8 +764,8 @@ function updateNPCs() {
     }
 
     if (n.id !== 'maru' && tileAt(n.x, n.y).b === 'water') {
-      n.x = HOUSE_PLOT.x + 90 + rnd(-40, 40);
-      n.y = HOUSE_PLOT.y + 90 + rnd(-30, 30);
+      n.x = n.home.x + rnd(-40, 40);
+      n.y = n.home.y + rnd(24, 72);
       n.target = null;
       n.vx = 0;
       n.vy = 0;
@@ -1053,6 +1151,59 @@ function openTownBoard() {
   openModal('마을 보드', html);
 }
 
+function openWorldMap() {
+  const size = 360;
+  const toMap = (x, y) => ({ x: (wrapAxis(x, WORLD_W) / WORLD_W) * size, y: (wrapAxis(y, WORLD_H) / WORLD_H) * size });
+  const center = size / 2;
+  const radius = size * 0.48;
+
+  const npcDots = state.npcs
+    .map((n) => {
+      const p = toMap(n.x, n.y);
+      return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="4" fill="${n.color}" /><text x="${(p.x + 6).toFixed(1)}" y="${(p.y + 3).toFixed(1)}" font-size="10" fill="#1e293b">${n.name}</text>`;
+    })
+    .join('');
+
+  const homes = NPC_HOMES.map((h) => {
+    const p = toMap(h.x, h.y);
+    return `<rect x="${(p.x - 4).toFixed(1)}" y="${(p.y - 4).toFixed(1)}" width="8" height="8" fill="#f97316" />`;
+  }).join('');
+
+  const poiPoints = [
+    { name: '내 집', pos: { x: HOUSE_PLOT.x, y: HOUSE_PLOT.y }, color: '#2563eb' },
+    { name: '상점', pos: SHOP_PLOT, color: '#16a34a' },
+    { name: '박물관', pos: MUSEUM_PLOT, color: '#7c3aed' },
+    { name: '농장', pos: FARM, color: '#b45309' },
+  ].map((poi) => {
+    const p = toMap(poi.pos.x, poi.pos.y);
+    return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="5" fill="${poi.color}" /><text x="${(p.x + 8).toFixed(1)}" y="${(p.y + 3).toFixed(1)}" font-size="10" fill="#0f172a">${poi.name}</text>`;
+  }).join('');
+
+  const me = toMap(state.player.x, state.player.y);
+  const mapSvg = `
+    <svg viewBox="0 0 ${size} ${size}" class="map-svg" role="img" aria-label="월드 지도">
+      <defs><clipPath id="globe"><circle cx="${center}" cy="${center}" r="${radius}"/></clipPath></defs>
+      <rect width="${size}" height="${size}" fill="#dff7ea"/>
+      <g clip-path="url(#globe)">
+        <rect width="${size}" height="${size}" fill="#9fd39a"/>
+        <rect x="${((WATER.x1 / MAP_W) * size).toFixed(1)}" y="${((WATER.y1 / MAP_H) * size).toFixed(1)}" width="${(((WATER.x2 - WATER.x1) / MAP_W) * size).toFixed(1)}" height="${(((WATER.y2 - WATER.y1) / MAP_H) * size).toFixed(1)}" fill="#63a7f9" rx="16"/>
+        ${homes}
+        ${poiPoints}
+        ${npcDots}
+        <circle cx="${me.x.toFixed(1)}" cy="${me.y.toFixed(1)}" r="5" fill="#ef4444"/>
+      </g>
+      <circle cx="${center}" cy="${center}" r="${radius}" fill="none" stroke="#0f172a" stroke-width="3"/>
+      <text x="12" y="18" font-size="11" fill="#0f172a">🔄 토러스 월드: 가장자리 없이 계속 이어집니다</text>
+    </svg>`;
+
+  const html = `
+    <div class="shop-item"><span>월드 규모</span><span>${MAP_W} x ${MAP_H} 타일</span></div>
+    <div class="shop-item"><span>월드 형태</span><span>둥근 순환형 (끝없는 루프)</span></div>
+    <div class="shop-item"><span>주민 주택 수</span><span>${NPC_HOMES.length}채 + 확장 여유</span></div>
+    <div class="map-wrap">${mapSvg}</div>`;
+  openModal('월드 지도', html);
+}
+
 function openMuseum() {
   const total = Object.values(state.museum).reduce((a,b)=>a+b,0);
   const html = `
@@ -1241,8 +1392,8 @@ function playerMove() {
       p.y = ny;
     }
   } else {
-    const nx = clamp(state.player.x + dx, 16, WORLD_W - 16);
-    const ny = clamp(state.player.y + dy, 16, WORLD_H - 16);
+    const nx = wrapAxis(state.player.x + dx, WORLD_W);
+    const ny = wrapAxis(state.player.y + dy, WORLD_H);
     if (isWalkable(nx, ny)) {
       state.player.x = nx; state.player.y = ny;
       if (tileAt(nx, ny).b !== 'water') { state.player.lastSafeX = nx; state.player.lastSafeY = ny; }
@@ -1663,7 +1814,10 @@ function buildThreeWorld() {
       const material = biome === 'water' ? mats.dirt : mats.grass;
       const tile = new THREE.Mesh(tileGeo, material);
       tile.receiveShadow = true;
-      tile.position.set(gx - MAP_W / 2, 0, gy - MAP_H / 2);
+      const tx = gx - MAP_W / 2;
+      const tz = gy - MAP_H / 2;
+      const curve = -((tx * tx + tz * tz) / (MAP_W * MAP_H)) * 1.2;
+      tile.position.set(tx, curve, tz);
       render3d.world.add(tile);
     }
   }
@@ -1738,6 +1892,23 @@ function buildThreeWorld() {
   museum.position.set(MUSEUM_PLOT.x / TILE - MAP_W / 2 + 2.1, 0, MUSEUM_PLOT.y / TILE - MAP_H / 2 + 1.2);
   render3d.museum = museum;
   render3d.world.add(museum);
+
+  const npcVillage = new THREE.Group();
+  NPC_HOMES.forEach((home, idx) => {
+    const homeMesh = createStyledBuilding({
+      mats,
+      width: 2.6 + (idx % 2) * 0.3,
+      depth: 2.2 + (idx % 3) * 0.2,
+      wallH: 2.0,
+      roofW: 2.0,
+      roofH: 1.2,
+      trim: idx % 2 ? '#9a3412' : '#1d4ed8',
+    });
+    homeMesh.position.set(home.x / TILE - MAP_W / 2, 0, home.y / TILE - MAP_H / 2);
+    npcVillage.add(homeMesh);
+  });
+  render3d.npcVillage = npcVillage;
+  render3d.world.add(npcVillage);
 
   const poiMat = new THREE.MeshStandardMaterial({ color: '#22d3ee', roughness: 0.4, metalness: 0.65, emissive: '#0ea5e9', emissiveIntensity: 0.35 });
   const to3DPoint = (pt) => ({ x: pt.x / TILE - MAP_W / 2, z: pt.y / TILE - MAP_H / 2 });
@@ -1990,6 +2161,21 @@ function syncRenderSurface() {
   ui.game3d.classList.toggle('hidden', !enable3D);
 }
 
+function renderMiniMapHtml(size = 180) {
+  const toMap = (x, y) => ({ x: (wrapAxis(x, WORLD_W) / WORLD_W) * size, y: (wrapAxis(y, WORLD_H) / WORLD_H) * size });
+  const me = toMap(state.player.x, state.player.y);
+  const npcs = state.npcs.map((n) => {
+    const p = toMap(n.x, n.y);
+    return `<circle cx="${p.x.toFixed(1)}" cy="${p.y.toFixed(1)}" r="2.8" fill="${n.color}"/>`;
+  }).join('');
+  const homes = NPC_HOMES.map((h) => {
+    const p = toMap(h.x, h.y);
+    return `<rect x="${(p.x - 1.8).toFixed(1)}" y="${(p.y - 1.8).toFixed(1)}" width="3.6" height="3.6" fill="#ea580c"/>`;
+  }).join('');
+  return `<svg viewBox="0 0 ${size} ${size}" class="map-mini-svg"><rect width="${size}" height="${size}" rx="14" fill="#bde5be"/>
+  <rect x="${((WATER.x1 / MAP_W) * size).toFixed(1)}" y="${((WATER.y1 / MAP_H) * size).toFixed(1)}" width="${(((WATER.x2 - WATER.x1) / MAP_W) * size).toFixed(1)}" height="${(((WATER.y2 - WATER.y1) / MAP_H) * size).toFixed(1)}" fill="#5ca4f8" rx="8"/>${homes}${npcs}<circle cx="${me.x.toFixed(1)}" cy="${me.y.toFixed(1)}" r="3.4" fill="#dc2626"/></svg>`;
+}
+
 function updateUI() {
   window.__renderStats = {
     textures: { ...render3d.textureStats },
@@ -2018,6 +2204,7 @@ function updateUI() {
   const ach = state.achievements;
   ui.achievements.innerHTML = `다리장인: ${ach.bridgeMaster ? '✅' : '⬜'}<br>큐레이터: ${ach.museum10 ? '✅' : '⬜'}<br>베스트프렌드: ${ach.relation90 ? '✅' : '⬜'}`;
   ui.log.innerHTML = state.logs.map((l) => `• ${l}`).join('<br>');
+  if (ui.worldMapMini) ui.worldMapMini.innerHTML = renderMiniMapHtml();
   const shopDoor = { x: SHOP_PLOT.x + 92, y: SHOP_PLOT.y + 102 };
   const museumDoor = { x: MUSEUM_PLOT.x + 106, y: MUSEUM_PLOT.y + 110 };
   state.prompt = '';
@@ -2122,6 +2309,7 @@ window.addEventListener('keydown', (e) => {
   }
 
   if (key === ' ') { e.preventDefault(); fishingInput(); return; }
+  if (key === 'm') { openWorldMap(); return; }
   if (key === 'e') { interact(); return; }
   if (key === 'f') { placeFurniture(); return; }
   if (key === 'r') { handleFarmAction(); return; }
@@ -2140,8 +2328,10 @@ ui.btnShop.addEventListener('click', openShop);
 ui.btnBuild.addEventListener('click', openBuild);
 ui.btnTown.addEventListener('click', openTownBoard);
 ui.btnMuseum.addEventListener('click', openMuseum);
+ui.btnMap?.addEventListener('click', openWorldMap);
 ui.btnShop.textContent = '🛒 상점(E 근처 입장)';
 ui.btnMuseum.textContent = '🏛️ 박물관(E 근처 입장)';
+if (ui.btnMap) ui.btnMap.textContent = '🗺️ 지도';
 ui.modalClose.addEventListener('click', closeModal);
 ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModal(); });
 ui.dialogueUi.addEventListener('click', (e) => {
