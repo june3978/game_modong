@@ -60,6 +60,7 @@ const ui = {
   btnTown: document.getElementById('btnTown'),
   btnMuseum: document.getElementById('btnMuseum'),
   btnMap: document.getElementById('btnMap'),
+  btnStyle: document.getElementById('btnStyle'),
 };
 
 const TILE = 48;
@@ -183,6 +184,7 @@ const state = {
   barterOffers: {},
   dialoguePools: {},
   debugPaths: false,
+  renderStyle: 'pbr',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -2168,7 +2170,64 @@ function createPBRTextureSet(basePath, repeat = [1, 1], fallbackColor = '#8aa08a
   };
 }
 
-function createWorldMaterials() {
+function createToonGradientTexture(steps = 5) {
+  const c = document.createElement('canvas');
+  c.width = steps;
+  c.height = 1;
+  const g = c.getContext('2d');
+  for (let i = 0; i < steps; i += 1) {
+    const v = Math.floor(40 + (i / Math.max(1, steps - 1)) * 215);
+    g.fillStyle = `rgb(${v},${v},${v})`;
+    g.fillRect(i, 0, 1, 1);
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.minFilter = THREE.NearestFilter;
+  t.magFilter = THREE.NearestFilter;
+  t.generateMipmaps = false;
+  return t;
+}
+
+function createWaterNormalCanvasTexture(size = 128) {
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const g = c.getContext('2d');
+  g.fillStyle = '#7f7fff';
+  g.fillRect(0, 0, size, size);
+  for (let i = 0; i < size * 6; i += 1) {
+    const x = Math.random() * size;
+    const y = Math.random() * size;
+    const r = 1 + Math.random() * 2;
+    g.fillStyle = Math.random() > 0.5 ? 'rgba(120,120,255,0.45)' : 'rgba(170,170,255,0.25)';
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  const t = new THREE.CanvasTexture(c);
+  t.wrapS = t.wrapT = THREE.RepeatWrapping;
+  t.repeat.set(6, 6);
+  return t;
+}
+
+function addOutlineToObject(object3d, scale = 1.03, color = '#1e293b') {
+  object3d.traverse((obj) => {
+    if (!obj.isMesh || !obj.geometry) return;
+    const outline = new THREE.Mesh(
+      obj.geometry,
+      new THREE.MeshBasicMaterial({ color, side: THREE.BackSide, transparent: true, opacity: 0.7 }),
+    );
+    outline.scale.setScalar(scale);
+    outline.renderOrder = -1;
+    outline.userData.isOutline = true;
+    obj.add(outline);
+  });
+}
+
+function createWorldMaterials(style = state.renderStyle || 'pbr') {
+  const isToon = style === 'toon';
+  const toonGrad = createToonGradientTexture(6);
+  const waterNormal = createWaterNormalCanvasTexture(128);
+
   const grassPBR = {
     map: createRemoteTexture([
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_diff_1k.jpg',
@@ -2182,21 +2241,6 @@ function createWorldMaterials() {
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_rough_1k.jpg',
       'https://threejs.org/examples/textures/terrain/grasslight-big.jpg',
     ], [12, 12], '#bcbcbc'),
-  };
-
-  const dirtPBR = {
-    map: createRemoteTexture([
-      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground_diff_1k.jpg',
-      'https://threejs.org/examples/textures/terrain/backgrounddetailed6.jpg',
-    ], [10, 10], '#7d6a4f'),
-    normalMap: createRemoteTexture([
-      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground_nor_gl_1k.jpg',
-      'https://threejs.org/examples/textures/water/Water_1_M_Normal.jpg',
-    ], [10, 10], '#7f7fff'),
-    roughnessMap: createRemoteTexture([
-      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground_rough_1k.jpg',
-      'https://threejs.org/examples/textures/terrain/backgrounddetailed6.jpg',
-    ], [10, 10], '#bcbcbc'),
   };
 
   const woodPBR = {
@@ -2214,36 +2258,32 @@ function createWorldMaterials() {
     ], [4, 4], '#bcbcbc'),
   };
 
-  const roofPBR = {
-    map: createRemoteTexture([
-      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_diff_1k.jpg',
-      'https://threejs.org/examples/textures/brick_diffuse.jpg',
-    ], [3, 3], '#7d3e3e'),
-    normalMap: createRemoteTexture([
-      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_nor_gl_1k.jpg',
-      'https://threejs.org/examples/textures/brick_normal.jpg',
-    ], [3, 3], '#7f7fff'),
-    roughnessMap: createRemoteTexture([
-      'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_rough_1k.jpg',
-      'https://threejs.org/examples/textures/brick_roughness.jpg',
-    ], [3, 3], '#bcbcbc'),
-  };
+  const make = (pbrOpts, toonColor) => (isToon
+    ? new THREE.MeshToonMaterial({ color: toonColor, gradientMap: toonGrad })
+    : new THREE.MeshStandardMaterial(pbrOpts));
 
-return {
-    grass: new THREE.MeshStandardMaterial({ ...grassPBR, roughness: 0.9, metalness: 0.02, envMapIntensity: 0.85, normalScale: new THREE.Vector2(1.2, 1.2) }),
-    dirt: new THREE.MeshStandardMaterial({ ...dirtPBR, roughness: 0.94, metalness: 0.02, envMapIntensity: 0.7, normalScale: new THREE.Vector2(0.9, 0.9) }),
-    wood: new THREE.MeshStandardMaterial({ ...woodPBR, roughness: 0.72, metalness: 0.08, envMapIntensity: 0.92, normalScale: new THREE.Vector2(1.1, 1.1) }),
-    bark: new THREE.MeshStandardMaterial({ color: '#4d3422', roughness: 0.92 }),
-    leaf: new THREE.MeshStandardMaterial({ color: '#4b8f45', roughness: 0.82, envMapIntensity: 0.5 }),
-    water: new THREE.MeshPhysicalMaterial({
-      color: '#4d9ad3', roughness: 0.18, metalness: 0.05, transmission: 0.38, transparent: true, opacity: 0.9,
-      ior: 1.33, clearcoat: 0.65, clearcoatRoughness: 0.16,
-    }),
-    bridge: new THREE.MeshStandardMaterial({ ...woodPBR, roughness: 0.68, metalness: 0.08, envMapIntensity: 0.95, normalScale: new THREE.Vector2(1.15, 1.15) }),
-    wall: new THREE.MeshStandardMaterial({ color: '#f0e7dc', roughness: 0.78, envMapIntensity: 0.68 }),
-    roof: new THREE.MeshStandardMaterial({ ...roofPBR, roughness: 0.62, envMapIntensity: 1.0, normalScale: new THREE.Vector2(1.25, 1.25) }),
-    npc: new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.62 }),
-    player: new THREE.MeshStandardMaterial({ color: '#3b82f6', roughness: 0.55 }),
+  return {
+    grass: make({ ...grassPBR, roughness: 0.88, metalness: 0.02 }, '#92d88f'),
+    meadow: make({ color: '#a9e7a0', roughness: 0.9, metalness: 0.01 }, '#a9e7a0'),
+    grove: make({ color: '#7dc37a', roughness: 0.9, metalness: 0.01 }, '#7dc37a'),
+    dirt: make({ color: '#b7a58d', roughness: 0.96, metalness: 0.01 }, '#c5b5a3'),
+    wood: make({ ...woodPBR, roughness: 0.72, metalness: 0.06 }, '#bc8f6e'),
+    bark: make({ color: '#85654d', roughness: 0.92 }, '#85654d'),
+    leaf: make({ color: '#8fd48f', roughness: 0.84 }, '#8fd48f'),
+    water: isToon
+      ? new THREE.MeshToonMaterial({ color: '#8fd7ea', gradientMap: toonGrad, transparent: true, opacity: 0.9 })
+      : new THREE.MeshPhysicalMaterial({
+        color: '#6bb7d6', roughness: 0.22, metalness: 0.04, transmission: 0.3, transparent: true, opacity: 0.92,
+        normalMap: waterNormal, normalScale: new THREE.Vector2(0.35, 0.35),
+      }),
+    waterNormal,
+    bridge: make({ ...woodPBR, roughness: 0.7, metalness: 0.05 }, '#b58d70'),
+    wall: make({ color: '#f4eadf', roughness: 0.78 }, '#f6eee7'),
+    roof: make({ color: '#d49aa1', roughness: 0.7 }, '#d49aa1'),
+    npc: make({ color: '#f2b18d', roughness: 0.64 }, '#f2b18d'),
+    player: make({ color: '#9cb8f6', roughness: 0.6 }, '#9cb8f6'),
+    toonGradient: toonGrad,
+    style,
   };
 }
 
@@ -2307,38 +2347,48 @@ async function loadFreeWorldProps() {
   await Promise.all(specs.map(loadOne));
 }
 
-function createRigCharacter(primary = '#3b82f6', secondary = '#0f172a', scale = 1) {
+function createRigCharacter(primary = '#3b82f6', secondary = '#0f172a', scale = 1, mats = null) {
   const g = new THREE.Group();
-  const bodyMat = new THREE.MeshStandardMaterial({ color: primary, roughness: 0.58, metalness: 0.05 });
-  const clothMat = new THREE.MeshStandardMaterial({ color: secondary, roughness: 0.72, metalness: 0.02 });
-  const skinMat = new THREE.MeshStandardMaterial({ color: '#f3d1b3', roughness: 0.7 });
+  const toonGrad = mats?.toonGradient;
+  const bodyMat = mats?.style === 'toon'
+    ? new THREE.MeshToonMaterial({ color: primary, gradientMap: toonGrad })
+    : new THREE.MeshStandardMaterial({ color: primary, roughness: 0.58, metalness: 0.05 });
+  const clothMat = mats?.style === 'toon'
+    ? new THREE.MeshToonMaterial({ color: secondary, gradientMap: toonGrad })
+    : new THREE.MeshStandardMaterial({ color: secondary, roughness: 0.72, metalness: 0.02 });
+  const skinMat = mats?.style === 'toon'
+    ? new THREE.MeshToonMaterial({ color: '#f7d8bf', gradientMap: toonGrad })
+    : new THREE.MeshStandardMaterial({ color: '#f3d1b3', roughness: 0.7 });
 
-  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.35 * scale, 0.78 * scale, 6, 12), bodyMat);
-  torso.position.y = 1.25 * scale;
+  const torso = new THREE.Mesh(new THREE.CapsuleGeometry(0.32 * scale, 0.62 * scale, 6, 12), bodyMat);
+  torso.position.y = 1.0 * scale;
   torso.castShadow = true;
 
-  const head = new THREE.Mesh(new THREE.SphereGeometry(0.28 * scale, 16, 16), skinMat);
-  head.position.y = 1.98 * scale;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42 * scale, 18, 18), skinMat);
+  head.position.y = 1.95 * scale;
   head.castShadow = true;
 
-  const armL = new THREE.Mesh(new THREE.CapsuleGeometry(0.1 * scale, 0.5 * scale, 6, 10), clothMat);
+  const armL = new THREE.Mesh(new THREE.CapsuleGeometry(0.095 * scale, 0.42 * scale, 6, 10), clothMat);
   const armR = armL.clone();
-  armL.position.set(-0.43 * scale, 1.25 * scale, 0);
-  armR.position.set(0.43 * scale, 1.25 * scale, 0);
-  armL.castShadow = armR.castShadow = true;
+  armL.position.set(-0.38 * scale, 1.05 * scale, 0);
+  armR.position.set(0.38 * scale, 1.05 * scale, 0);
 
-  const legL = new THREE.Mesh(new THREE.CapsuleGeometry(0.12 * scale, 0.62 * scale, 6, 10), clothMat);
+  const legL = new THREE.Mesh(new THREE.CapsuleGeometry(0.12 * scale, 0.42 * scale, 6, 10), clothMat);
   const legR = legL.clone();
-  legL.position.set(-0.18 * scale, 0.58 * scale, 0);
-  legR.position.set(0.18 * scale, 0.58 * scale, 0);
-  legL.castShadow = legR.castShadow = true;
+  legL.position.set(-0.16 * scale, 0.42 * scale, 0);
+  legR.position.set(0.16 * scale, 0.42 * scale, 0);
 
-  const bag = new THREE.Mesh(new THREE.BoxGeometry(0.22 * scale, 0.28 * scale, 0.13 * scale), new THREE.MeshStandardMaterial({ color: '#92400e', roughness: 0.86 }));
-  bag.position.set(-0.27 * scale, 1.2 * scale, -0.25 * scale);
-  bag.castShadow = true;
+  const eyeMat = new THREE.MeshBasicMaterial({ color: '#111827' });
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.04 * scale, 8, 8), eyeMat);
+  const eyeR = eyeL.clone();
+  eyeL.position.set(-0.13 * scale, 2.0 * scale, 0.34 * scale);
+  eyeR.position.set(0.13 * scale, 2.0 * scale, 0.34 * scale);
 
-  g.add(torso, head, armL, armR, legL, legR, bag);
-  g.userData.parts = { armL, armR, legL, legR, torso };
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.1 * scale, 0.02 * scale, 0.01 * scale), new THREE.MeshBasicMaterial({ color: '#7f1d1d' }));
+  mouth.position.set(0, 1.86 * scale, 0.36 * scale);
+
+  g.add(torso, head, armL, armR, legL, legR, eyeL, eyeR, mouth);
+  g.userData.parts = { armL, armR, legL, legR, torso, eyeL, eyeR };
   g.userData.phase = Math.random() * Math.PI * 2;
   return g;
 }
@@ -2398,7 +2448,7 @@ function createStyledBuilding({ mats, width = 3.6, depth = 2.8, wallH = 2.4, roo
 
 function animateRigCharacter(model, t, moving = true) {
   if (!model?.userData?.parts) return;
-  const { armL, armR, legL, legR, torso } = model.userData.parts;
+  const { armL, armR, legL, legR, torso, eyeL, eyeR } = model.userData.parts;
   const speed = moving ? 7.2 : 2.2;
   const amp = moving ? 0.72 : 0.16;
   const wave = Math.sin(t * speed + (model.userData.phase || 0));
@@ -2409,6 +2459,13 @@ function animateRigCharacter(model, t, moving = true) {
   legL.rotation.x = -wave * amp * 0.9;
   legR.rotation.x = wave * amp * 0.9;
   torso.rotation.z = sway * 0.04;
+
+  const blink = Math.sin((t + (model.userData.phase || 0)) * 1.7);
+  const eyeScale = blink > 0.97 ? 0.1 : 1;
+  if (eyeL && eyeR) {
+    eyeL.scale.y = eyeScale;
+    eyeR.scale.y = eyeScale;
+  }
 }
 
 function createCharacterMesh(material, scale = 1) {
@@ -2424,25 +2481,61 @@ function createCharacterMesh(material, scale = 1) {
 }
 
 function buildThreeWorld() {
-  const mats = createWorldMaterials();
+  const mats = createWorldMaterials(state.renderStyle);
   render3d.mats = mats;
   render3d.world = new THREE.Group();
   render3d.scene.add(render3d.world);
 
   const tileGeo = new THREE.BoxGeometry(1, 0.5, 1);
+  const grassCells = [];
+  const meadowCells = [];
+  const groveCells = [];
+  const dirtCells = [];
+
   for (let gy = 0; gy < MAP_H; gy += 1) {
     for (let gx = 0; gx < MAP_W; gx += 1) {
       const biome = biomes[gy][gx];
-      const material = biome === 'water' ? mats.dirt : mats.grass;
-      const tile = new THREE.Mesh(tileGeo, material);
-      tile.receiveShadow = true;
-      const tx = gx - MAP_W / 2;
-      const tz = gy - MAP_H / 2;
-      const curve = -((tx * tx + tz * tz) / (MAP_W * MAP_H)) * 1.2;
-      tile.position.set(tx, curve, tz);
-      render3d.world.add(tile);
+      if (biome === 'water') {
+        dirtCells.push({ gx, gy });
+      } else if (biome === 'meadow') {
+        meadowCells.push({ gx, gy });
+      } else if (biome === 'grove') {
+        groveCells.push({ gx, gy });
+      } else {
+        grassCells.push({ gx, gy });
+      }
     }
   }
+
+  const addTileInstances = (cells, material, tint = 0.05) => {
+    const mesh = new THREE.InstancedMesh(tileGeo, material, cells.length);
+    mesh.receiveShadow = true;
+    const m = new THREE.Matrix4();
+    const color = new THREE.Color();
+    cells.forEach((cell, i) => {
+      const tx = cell.gx - MAP_W / 2;
+      const tz = cell.gy - MAP_H / 2;
+      const curve = -((tx * tx + tz * tz) / (MAP_W * MAP_H)) * 1.2;
+      m.makeTranslation(tx, curve, tz);
+      mesh.setMatrixAt(i, m);
+      if (mesh.instanceColor) {
+        const v = 1 + (Math.random() - 0.5) * tint;
+        color.setRGB(v, v, v);
+        mesh.setColorAt(i, color);
+      }
+    });
+    mesh.instanceMatrix.needsUpdate = true;
+    if (mesh.instanceColor) mesh.instanceColor.needsUpdate = true;
+    render3d.world.add(mesh);
+    return mesh;
+  };
+
+  render3d.tileInstances = {
+    grass: addTileInstances(grassCells, mats.grass, 0.08),
+    meadow: addTileInstances(meadowCells, mats.meadow || mats.grass, 0.1),
+    grove: addTileInstances(groveCells, mats.grove || mats.grass, 0.08),
+    dirt: addTileInstances(dirtCells, mats.dirt, 0.06),
+  };
 
   const pondW = WATER.x2 - WATER.x1 - 1;
   const pondH = WATER.y2 - WATER.y1 - 1;
@@ -2452,6 +2545,21 @@ function buildThreeWorld() {
   water.receiveShadow = true;
   render3d.water = water;
   render3d.world.add(water);
+
+  const foamMat = new THREE.MeshBasicMaterial({ color: '#e8fbff', transparent: true, opacity: 0.35 });
+  const foamGroup = new THREE.Group();
+  const cx = (WATER.x1 + WATER.x2) / 2 - MAP_W / 2;
+  const cz = (WATER.y1 + WATER.y2) / 2 - MAP_H / 2;
+  const fx = (WATER.x2 - WATER.x1);
+  const fz = (WATER.y2 - WATER.y1);
+  const foamTop = new THREE.Mesh(new THREE.PlaneGeometry(fx, 0.2), foamMat);
+  foamTop.position.set(cx, 0.17, cz - fz / 2);
+  const foamBot = foamTop.clone(); foamBot.position.set(cx, 0.17, cz + fz / 2);
+  const foamL = new THREE.Mesh(new THREE.PlaneGeometry(0.2, fz), foamMat); foamL.position.set(cx - fx / 2, 0.17, cz);
+  const foamR = foamL.clone(); foamR.position.set(cx + fx / 2, 0.17, cz);
+  [foamTop, foamBot, foamL, foamR].forEach((f) => { f.rotation.x = -Math.PI / 2; foamGroup.add(f); });
+  render3d.waterFoam = foamGroup;
+  render3d.world.add(foamGroup);
 
   const bridgeGroup = new THREE.Group();
   const bridgeLen = BRIDGE.x2 - BRIDGE.x1 + 1;
@@ -2465,22 +2573,31 @@ function buildThreeWorld() {
   bridgeGroup.visible = state.bridgeBuilt;
   render3d.bridge = bridgeGroup;
   render3d.world.add(bridgeGroup);
+  if (state.renderStyle === 'toon') addOutlineToObject(bridgeGroup, 1.03, '#233042');
 
-  for (let i = 0; i < 90; i += 1) {
+  const treeCount = 120;
+  const trunkGeo = new THREE.CylinderGeometry(0.15, 0.2, 1.4, 8);
+  const leafGeo = new THREE.SphereGeometry(0.7, 10, 10);
+  const trunks = new THREE.InstancedMesh(trunkGeo, mats.bark, treeCount);
+  const leaves = new THREE.InstancedMesh(leafGeo, mats.leaf, treeCount);
+  trunks.castShadow = true; leaves.castShadow = true;
+  trunks.receiveShadow = true; leaves.receiveShadow = true;
+  const m1 = new THREE.Matrix4();
+  const m2 = new THREE.Matrix4();
+  let ti = 0;
+  while (ti < treeCount) {
     const x = rnd(2, MAP_W - 2) - MAP_W / 2;
     const z = rnd(2, MAP_H - 2) - MAP_H / 2;
     if (x > WATER.x1 - MAP_W / 2 && x < WATER.x2 - MAP_W / 2 && z > WATER.y1 - MAP_H / 2 && z < WATER.y2 - MAP_H / 2) continue;
-    const tree = new THREE.Group();
-    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 1.4, 8), mats.bark);
-    trunk.position.y = 0.9;
-    trunk.castShadow = true;
-    const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.7, 10, 10), mats.leaf);
-    leaf.position.y = 1.9;
-    leaf.castShadow = true;
-    tree.add(trunk, leaf);
-    tree.position.set(x, 0.25, z);
-    render3d.world.add(tree);
+    m1.makeTranslation(x, 0.9, z);
+    m2.makeTranslation(x, 1.9, z);
+    trunks.setMatrixAt(ti, m1);
+    leaves.setMatrixAt(ti, m2);
+    ti += 1;
   }
+  trunks.count = ti; leaves.count = ti;
+  trunks.instanceMatrix.needsUpdate = true; leaves.instanceMatrix.needsUpdate = true;
+  render3d.world.add(trunks); render3d.world.add(leaves);
 
   const house = createStyledBuilding({ mats, width: 3.3, depth: 2.7, wallH: 2.3, roofW: 2.45, roofH: 1.7, trim: '#7c2d12' });
   house.position.set(HOUSE_PLOT.x / TILE - MAP_W / 2 + 1.8, 0, HOUSE_PLOT.y / TILE - MAP_H / 2 + 1.2);
@@ -2517,22 +2634,16 @@ function buildThreeWorld() {
 
   const npcVillage = new THREE.Group();
   NPC_HOMES.forEach((home, idx) => {
-    const homeMesh = createStyledBuilding({
-      mats,
-      width: 2.6 + (idx % 2) * 0.3,
-      depth: 2.2 + (idx % 3) * 0.2,
-      wallH: 2.0,
-      roofW: 2.0,
-      roofH: 1.2,
-      trim: idx % 2 ? '#9a3412' : '#1d4ed8',
-    });
+    const homeMesh = createStyledBuilding({ mats, width: 2.6 + (idx % 2) * 0.3, depth: 2.2 + (idx % 3) * 0.2, wallH: 2.0, roofW: 2.0, roofH: 1.2, trim: idx % 2 ? '#9a3412' : '#1d4ed8' });
     homeMesh.position.set(home.x / TILE - MAP_W / 2, 0, home.y / TILE - MAP_H / 2);
     npcVillage.add(homeMesh);
   });
   render3d.npcVillage = npcVillage;
   render3d.world.add(npcVillage);
 
-  const poiMat = new THREE.MeshStandardMaterial({ color: '#22d3ee', roughness: 0.4, metalness: 0.65, emissive: '#0ea5e9', emissiveIntensity: 0.35 });
+  const poiMat = state.renderStyle === 'toon'
+    ? new THREE.MeshToonMaterial({ color: '#9de6ea', gradientMap: mats.toonGradient })
+    : new THREE.MeshStandardMaterial({ color: '#22d3ee', roughness: 0.4, metalness: 0.65, emissive: '#0ea5e9', emissiveIntensity: 0.35 });
   const to3DPoint = (pt) => ({ x: pt.x / TILE - MAP_W / 2, z: pt.y / TILE - MAP_H / 2 });
   const poiDefs = [
     { key: 'fountain', pt: FOUNTAIN, color: '#60a5fa' },
@@ -2550,29 +2661,33 @@ function buildThreeWorld() {
     return m;
   });
 
-  render3d.player = createRigCharacter('#3b82f6', '#1e293b', 1);
+  render3d.player = createRigCharacter('#9cb8f6', '#5f7ec8', 1, mats);
   render3d.world.add(render3d.player);
   markAssetStats('model', true);
 
   render3d.npcMeshes = state.npcs.map((npc, idx) => {
     const palette = [
-      ['#f59e0b', '#7c2d12'],
-      ['#34d399', '#14532d'],
-      ['#f472b6', '#831843'],
+      ['#f6b18f', '#cc7a66'],
+      ['#98ddb4', '#5e9877'],
+      ['#c6b8f7', '#7f73c0'],
     ][idx % 3];
-    const mesh = createRigCharacter(palette[0], palette[1], 0.95);
+    const mesh = createRigCharacter(palette[0], palette[1], 0.98, mats);
     render3d.world.add(mesh);
     markAssetStats('model', true);
     return mesh;
   });
 
   render3d.resourceMeshes = state.objects.map((obj) => {
-    const color = obj.type === 'wood' ? '#6b4f3a' : obj.type === 'flower' ? '#f472b6' : obj.type === 'berry' ? '#5b4fd8' : obj.type === 'shell' ? '#e5e7eb' : '#fef08a';
-    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), new THREE.MeshStandardMaterial({ color, roughness: 0.65 }));
+    const color = obj.type === 'wood' ? '#b08b6f' : obj.type === 'flower' ? '#f7a8c8' : obj.type === 'berry' ? '#9485f2' : obj.type === 'shell' ? '#e5e7eb' : '#fef08a';
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), state.renderStyle === 'toon' ? new THREE.MeshToonMaterial({ color, gradientMap: mats.toonGradient }) : new THREE.MeshStandardMaterial({ color, roughness: 0.65 }));
     mesh.castShadow = true;
     render3d.world.add(mesh);
     return mesh;
   });
+
+  if (state.renderStyle === 'toon') {
+    [render3d.player, ...render3d.npcMeshes, house, shop, museum, npcVillage].forEach((obj) => addOutlineToObject(obj, 1.03, '#2a3a4f'));
+  }
 }
 
 async function ensure3DWorld() {
@@ -2708,7 +2823,11 @@ function sync3DEntities() {
   render3d.house.visible = state.house.tier > 0;
 
   if (render3d.water) {
-    render3d.water.material.roughness = state.weather === 'rainy' ? 0.08 : 0.2;
+    if ('roughness' in render3d.water.material) render3d.water.material.roughness = state.weather === 'rainy' ? 0.08 : 0.2;
+    if (render3d.mats?.waterNormal) {
+      render3d.mats.waterNormal.offset.x = state.time * 0.0007;
+      render3d.mats.waterNormal.offset.y = state.time * 0.00045;
+    }
     render3d.water.position.y = 0.13 + Math.sin(state.time * 0.02) * 0.03;
   }
 }
@@ -2735,16 +2854,25 @@ function renderWorld3D() {
   render3d.camera.lookAt(centerX, 1.3, centerZ);
 
   const daylight = (Math.sin(state.time * 0.0023) + 1) / 2;
-  render3d.sun.intensity = 2.3 + daylight * 2.4;
-  if (render3d.hemi) render3d.hemi.intensity = 0.3 + daylight * 0.45;
-  if (render3d.bounce) render3d.bounce.intensity = 0.5 + daylight * 0.55;
-
   const rainy = state.weather === 'rainy';
-  render3d.scene.fog.color.set(rainy ? '#8b9caf' : '#a5d8ff');
-  render3d.scene.background.set(rainy ? '#7f97ad' : '#9ad2ff');
+  const toon = state.renderStyle === 'toon';
+  render3d.sun.intensity = (toon ? 2.0 : 2.3) + daylight * (toon ? 1.8 : 2.4);
+  render3d.sun.color.set(toon ? '#fff2db' : '#ffffff');
+  if (render3d.hemi) {
+    render3d.hemi.intensity = (toon ? 0.42 : 0.3) + daylight * (toon ? 0.34 : 0.45);
+    render3d.hemi.color.set(toon ? '#ffe5c1' : '#ffffff');
+    render3d.hemi.groundColor.set(toon ? '#a4c8ff' : '#4f83b8');
+  }
+  if (render3d.bounce) {
+    render3d.bounce.intensity = (toon ? 0.8 : 0.5) + daylight * (toon ? 0.35 : 0.55);
+    render3d.bounce.color.set(toon ? '#d6e8ff' : '#9ec5ff');
+  }
+
+  render3d.scene.fog.color.set(rainy ? (toon ? '#a9b7c4' : '#8b9caf') : (toon ? '#c7e7ef' : '#a5d8ff'));
+  render3d.scene.background.set(rainy ? (toon ? '#98aab8' : '#7f97ad') : (toon ? '#c6eef8' : '#9ad2ff'));
   render3d.scene.fog.near = rainy ? 16 : 26;
   render3d.scene.fog.far = rainy ? 68 : 95;
-  render3d.renderer.toneMappingExposure = rainy ? 0.96 : 1.2;
+  render3d.renderer.toneMappingExposure = rainy ? (toon ? 1.02 : 0.96) : (toon ? 1.18 : 1.2);
 
   if (render3d.skyDome) {
     render3d.skyDome.material.color.set(rainy ? '#8ea9c0' : '#b9dcff');
@@ -2764,6 +2892,12 @@ function renderWorld3D() {
       }
       render3d.rain.geometry.attributes.position.needsUpdate = true;
     }
+  }
+
+  if (render3d.waterFoam) {
+    render3d.waterFoam.children.forEach((f, i) => {
+      f.material.opacity = 0.24 + Math.sin(state.time * 0.03 + i) * 0.05;
+    });
   }
 
   if (render3d.poiMeshes?.length) {
@@ -2810,7 +2944,7 @@ function updateUI() {
   const t = (Math.sin(state.time * 0.0023) + 1) / 2;
   const phase = t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
   state.decorScore = calcDecorScore();
-  ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · 🎉 ${state.dailyEvent} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level} · 🏠 ${state.decorScore} · ${state.renderMode.toUpperCase()} · TX ${render3d.textureStats.loaded}/${render3d.textureStats.failed} · MD ${render3d.modelStats.loaded}/${render3d.modelStats.failed} · ${state.version}`;
+  ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · 🎉 ${state.dailyEvent} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level} · 🏠 ${state.decorScore} · ${state.renderMode.toUpperCase()}/${state.renderStyle.toUpperCase()} · TX ${render3d.textureStats.loaded}/${render3d.textureStats.failed} · MD ${render3d.modelStats.loaded}/${render3d.modelStats.failed} · ${state.version}`;
   ui.inventory.innerHTML = ITEMS.map(([k, e]) => `<div>${e} ${k}: <b>${state.inv[k]}</b></div>`).join('');
 
   const q = getQuest();
@@ -2896,6 +3030,23 @@ function tick() {
 }
 
 
+function rebuildThreeWorldForStyle() {
+  if (!render3d.ready || !render3d.scene) return;
+  if (render3d.world) {
+    render3d.scene.remove(render3d.world);
+  }
+  buildThreeWorld();
+}
+
+function toggleRenderStyle() {
+  state.renderStyle = state.renderStyle === 'pbr' ? 'toon' : 'pbr';
+  if (state.renderMode === '3d' && render3d.ready) {
+    rebuildThreeWorldForStyle();
+  }
+  if (ui.btnStyle) ui.btnStyle.textContent = state.renderStyle === 'toon' ? '🎨 PBR 스타일' : '🎨 동숲 스타일';
+  setMsg(state.renderStyle === 'toon' ? '동숲 스타일 활성화' : 'PBR 스타일 활성화');
+}
+
 async function toggleRenderMode() {
   const next = state.renderMode === '2d' ? '3d' : '2d';
   if (next === '3d' && !render3d.ready) await ensure3DWorld();
@@ -2951,9 +3102,11 @@ ui.btnBuild.addEventListener('click', openBuild);
 ui.btnTown.addEventListener('click', openTownBoard);
 ui.btnMuseum.addEventListener('click', openMuseum);
 ui.btnMap?.addEventListener('click', openWorldMap);
+ui.btnStyle?.addEventListener('click', toggleRenderStyle);
 ui.btnShop.textContent = '🛒 상점(E 근처 입장)';
 ui.btnMuseum.textContent = '🏛️ 박물관(E 근처 입장)';
 if (ui.btnMap) ui.btnMap.textContent = '🗺️ 지도';
+if (ui.btnStyle) ui.btnStyle.textContent = '🎨 동숲 스타일';
 ui.modalClose.addEventListener('click', closeModal);
 ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModal(); });
 ui.dialogueUi.addEventListener('click', (e) => {
