@@ -58,6 +58,27 @@ const NPC_HOMES = [
   { id: 'pipi', x: 2080, y: 1160, color: '#95e2d4' },
 ];
 
+
+const NPC_TRAITS = {
+  luna: { poi: ['fountain', 'house', 'campfire'], socialBias: 0.68, rainyHomeBias: 0.78 },
+  bomi: { poi: ['farm', 'campfire', 'house'], socialBias: 0.45, rainyHomeBias: 0.42 },
+  maru: { poi: ['pier', 'water', 'lookout'], socialBias: 0.36, rainyHomeBias: 0.2 },
+  nari: { poi: ['museum', 'fountain', 'house'], socialBias: 0.56, rainyHomeBias: 0.5 },
+  toto: { poi: ['shop', 'campfire', 'lookout'], socialBias: 0.62, rainyHomeBias: 0.46 },
+  pipi: { poi: ['fountain', 'shop', 'pier'], socialBias: 0.54, rainyHomeBias: 0.4 },
+};
+
+const NPC_POI_POINTS = {
+  house: { x: HOUSE_PLOT.x + 90, y: HOUSE_PLOT.y + 90 },
+  farm: { x: FARM.x + FARM.w / 2, y: FARM.y + FARM.h / 2 },
+  shop: { x: SHOP_PLOT.x + 92, y: SHOP_PLOT.y + 102 },
+  museum: { x: MUSEUM_PLOT.x + 106, y: MUSEUM_PLOT.y + 110 },
+  fountain: FOUNTAIN,
+  campfire: CAMPFIRE,
+  lookout: LOOKOUT,
+  pier: PIER,
+};
+
 const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   Array.from({ length: MAP_W }, (_, gx) => {
     if (gx > WATER.x1 && gx < WATER.x2 && gy > WATER.y1 && gy < WATER.y2) return 'water';
@@ -487,6 +508,14 @@ function initNPCs() {
     talkTimer: 0,
     stuckFrames: 0,
     lastProgressDist: 0,
+    actionTimer: 0,
+    lastMutterAt: 0,
+    nextMutterGap: 180 + Math.floor(Math.random() * 180),
+    recentTalks: [],
+    poiVisitDay: state.day,
+    poiVisitsToday: 0,
+    visitedPoiToday: {},
+    traits: NPC_TRAITS[h.id] || NPC_TRAITS.nari,
   }));
 
   state.npcs.forEach((n) => {
@@ -810,28 +839,109 @@ function updateFish() {
   });
 }
 
+function getDayProgress() {
+  return (state.time % 2600) / 2600;
+}
+
 function npcScheduledState(npc) {
-  const phase = (Math.sin(state.time * 0.0023) + 1) / 2;
-  if (phase < 0.28) return 'idle';
-  if (phase < 0.45) return npc.id === 'maru' ? 'fish' : 'farm';
-  if (phase < 0.75) return npc.id === 'maru' ? 'fish' : 'wander';
+  const p = getDayProgress();
+  const rainy = state.weather === 'rainy';
+
+  if (npc.id === 'maru') {
+    if (rainy && Math.random() < 0.75) return 'fish';
+    if (p < 0.24) return 'idle';
+    if (p < 0.66) return 'fish';
+    if (p < 0.84) return 'wander';
+    return 'social';
+  }
+
+  if (npc.id === 'bomi') {
+    if (p < 0.22) return 'idle';
+    if (p < 0.62) return 'farm';
+    if (p < 0.82) return 'wander';
+    return 'social';
+  }
+
+  if (npc.id === 'luna') {
+    if (rainy && Math.random() < npc.traits.rainyHomeBias) return 'idle';
+    if (p < 0.28) return 'idle';
+    if (p < 0.55) return 'wander';
+    return 'social';
+  }
+
+  if (p < 0.26) return 'idle';
+  if (p < 0.5) return 'wander';
+  if (p < 0.74) return 'farm';
   return 'social';
+}
+
+function pushRecentTalk(npc, line) {
+  if (!line) return;
+  if (!Array.isArray(npc.recentTalks)) npc.recentTalks = [];
+  npc.recentTalks.unshift(line);
+  npc.recentTalks = npc.recentTalks.slice(0, 6);
+}
+
+function setNpcTalk(npc, line, duration = 80) {
+  if (!line) return;
+  if (npc.recentTalks?.includes(line)) return;
+  npc.talk = line;
+  npc.talkTimer = duration;
+  pushRecentTalk(npc, line);
+}
+
+function pickPoiTarget(npc, poiKey) {
+  const poi = NPC_POI_POINTS[poiKey];
+  if (!poi) return null;
+  const ring = poiKey === 'farm' ? 55 : poiKey === 'pier' ? 70 : 86;
+  for (let i = 0; i < 14; i += 1) {
+    const cand = {
+      x: wrapAxis(poi.x + rnd(-ring, ring), WORLD_W),
+      y: wrapAxis(poi.y + rnd(-ring, ring), WORLD_H),
+    };
+    if (poiKey === 'pier' || poiKey === 'water') {
+      const near = nearWaterEdge(cand.x, cand.y) || tileAt(cand.x, cand.y).b === 'water';
+      if (near) return cand;
+    } else if (tileAt(cand.x, cand.y).b !== 'water' && isWalkable(cand.x, cand.y)) {
+      return cand;
+    }
+  }
+  return null;
+}
+
+function markPoiVisit(npc, key) {
+  if (npc.poiVisitDay !== state.day) {
+    npc.poiVisitDay = state.day;
+    npc.poiVisitsToday = 0;
+    npc.visitedPoiToday = {};
+  }
+  if (!npc.visitedPoiToday[key]) {
+    npc.visitedPoiToday[key] = true;
+    npc.poiVisitsToday += 1;
+  }
 }
 
 function pickLandTarget(npc, stateName = 'wander') {
   const centers = [
     { x: npc.home.x, y: npc.home.y + 38 },
-    { x: HOUSE_PLOT.x + 90, y: HOUSE_PLOT.y + 90 },
-    { x: FARM.x + FARM.w / 2, y: FARM.y + FARM.h / 2 },
-    { x: SHOP_PLOT.x + 92, y: SHOP_PLOT.y + 102 },
-    { x: MUSEUM_PLOT.x + 106, y: MUSEUM_PLOT.y + 110 },
-    FOUNTAIN,
-    CAMPFIRE,
-    LOOKOUT,
-    PIER,
+    NPC_POI_POINTS.house,
+    NPC_POI_POINTS.farm,
+    NPC_POI_POINTS.shop,
+    NPC_POI_POINTS.museum,
+    NPC_POI_POINTS.fountain,
+    NPC_POI_POINTS.campfire,
+    NPC_POI_POINTS.lookout,
   ];
 
-  const ring = stateName === 'idle' ? 26 : stateName === 'social' ? 92 : stateName === 'farm' ? 70 : 300;
+  const traitPois = npc.traits?.poi || [];
+  for (const poiKey of traitPois) {
+    if (poiKey !== 'pier' && poiKey !== 'water') {
+      const p = pickPoiTarget(npc, poiKey);
+      if (p && Math.random() < 0.52) return p;
+    }
+  }
+
+  const ring = stateName === 'idle' ? 28 : stateName === 'social' ? 90 : stateName === 'farm' ? 64 : 280;
   for (let i = 0; i < 18; i += 1) {
     const c = centers[(i + state.day + npc.name.length) % centers.length];
     const cand = {
@@ -844,21 +954,87 @@ function pickLandTarget(npc, stateName = 'wander') {
   return { x: npc.home.x, y: npc.home.y + 36 };
 }
 
+function chooseNpcTargetByState(npc, stateName) {
+  const p = getDayProgress();
+  const rainy = state.weather === 'rainy';
+
+  if (npc.poiVisitDay !== state.day) {
+    npc.poiVisitDay = state.day;
+    npc.poiVisitsToday = 0;
+    npc.visitedPoiToday = {};
+  }
+
+  const mustVisitPoiSoon = npc.poiVisitsToday < 1 && p > 0.58;
+  if (stateName === 'fish') {
+    if (npc.id === 'maru' && Math.random() < 0.55) {
+      const pier = pickPoiTarget(npc, 'pier');
+      if (pier) return { target: pier, poiKey: 'pier' };
+    }
+    const wx = rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE);
+    const wy = rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE);
+    return { target: { x: wx, y: wy }, poiKey: 'water' };
+  }
+
+  if (mustVisitPoiSoon) {
+    const ordered = (npc.traits?.poi || ['fountain', 'house', 'farm']).filter((k) => k !== 'water' && k !== 'pier');
+    for (const poiKey of ordered) {
+      if (!npc.visitedPoiToday[poiKey]) {
+        const t = pickPoiTarget(npc, poiKey);
+        if (t) return { target: t, poiKey };
+      }
+    }
+  }
+
+  if (npc.id === 'luna' && rainy) {
+    return { target: pickLandTarget(npc, 'idle'), poiKey: 'house' };
+  }
+  if (npc.id === 'bomi' && stateName === 'farm') {
+    const farm = pickPoiTarget(npc, 'farm');
+    if (farm) return { target: farm, poiKey: 'farm' };
+  }
+  if (npc.id === 'bomi' && stateName === 'social' && p > 0.72) {
+    const fire = pickPoiTarget(npc, 'campfire');
+    if (fire) return { target: fire, poiKey: 'campfire' };
+  }
+
+  if (stateName === 'social' && Math.random() < (npc.traits?.socialBias || 0.45)) {
+    const others = state.npcs.filter((x) => x !== npc);
+    if (others.length) {
+      const mate = others[(state.day + Math.floor(state.time / 90) + npc.name.length) % others.length];
+      return {
+        target: pickLandTarget({ ...npc, home: { x: mate.x, y: mate.y } }, 'social'),
+        mate,
+      };
+    }
+  }
+
+  return { target: pickLandTarget(npc, stateName) };
+}
+
 function updateNPCs() {
   state.npcs.forEach((n) => {
     if (n.pause) return;
     n.state = npcScheduledState(n);
     if (n.id !== 'maru' && n.state === 'fish') n.state = 'wander';
     if (n.talkTimer > 0) n.talkTimer -= 1;
+    if (n.actionTimer > 0) n.actionTimer -= 1;
 
     const needNewTarget = !n.target || dist(n, n.target) < 20;
     if (needNewTarget) {
-      if (n.state === 'fish') {
-        n.target = { x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE), y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE) };
-      } else {
-        n.target = pickLandTarget(n, n.state);
+      const pick = chooseNpcTargetByState(n, n.state);
+      n.target = pick.target;
+      if (pick.poiKey) markPoiVisit(n, pick.poiKey);
+      if (pick.mate && n.state === 'social') {
+        setNpcTalk(n, `${pick.mate.name} 어디 갔지? 같이 얘기하자!`, 72);
       }
       n.stuckFrames = 0;
+
+      if (n.state === 'farm' && Math.random() < 0.35) {
+        n.actionTimer = 60 + Math.floor(Math.random() * 60);
+      }
+      if (n.state === 'idle' && Math.random() < 0.25) {
+        n.actionTimer = 24 + Math.floor(Math.random() * 40);
+      }
     }
 
     if (n.id !== 'maru' && n.target && tileAt(n.target.x, n.target.y).b === 'water') {
@@ -869,11 +1045,15 @@ function updateNPCs() {
     const dx = circularDelta(n.target.x, n.x, WORLD_W);
     const dy = circularDelta(n.target.y, n.y, WORLD_H);
     const d = Math.hypot(dx, dy);
+
     if (d > 1) {
-      const spd = n.state === 'idle' ? 0.6 : 1.15;
+      const baseSpd = n.state === 'idle' ? 0.62 : n.state === 'social' ? 1.05 : 1.15;
+      const spd = n.actionTimer > 0 ? 0.08 : baseSpd;
       const nx = n.x + (dx / d) * spd;
       const ny = n.y + (dy / d) * spd;
-      if (isWalkable(nx, ny) || n.state === 'fish') {
+      const walkable = isWalkable(nx, ny) || n.state === 'fish' || nearWaterEdge(nx, ny);
+
+      if (walkable) {
         n.vx = nx - n.x;
         n.vy = ny - n.y;
         n.x = wrapAxis(nx, WORLD_W);
@@ -889,9 +1069,8 @@ function updateNPCs() {
       else n.stuckFrames = 0;
 
       if (n.stuckFrames > 120) {
-        n.target = n.state === 'fish'
-          ? { x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE), y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE) }
-          : pickLandTarget(n, n.state);
+        const repick = chooseNpcTargetByState(n, n.state);
+        n.target = repick.target;
         n.stuckFrames = 0;
       }
     } else {
@@ -912,8 +1091,30 @@ function updateNPCs() {
     }
 
     const rel = state.relationships[n.id] || 0;
-    if (n.talkTimer <= 0) {
-      n.talk = dist(state.player, n) < 100 ? `${n.state === 'social' ? '수다 떨래?' : 'E로 대화!'} (호감 ${rel})` : '';
+    const nearPlayer = dist(state.player, n) < 100;
+    if (nearPlayer && n.talkTimer <= 0) {
+      const emo = rel > 75 ? '😊' : rel < 35 ? '😶' : '🙂';
+      const weatherHint = state.weather === 'rainy'
+        ? (n.id === 'maru' ? '비 오는 날 낚시는 손맛이 좋아!' : '비 피해서 천천히 걷는 중이야.')
+        : (n.state === 'social' ? '수다 떨기 딱 좋은 날이야.' : '오늘도 마을을 돌보는 중!');
+      setNpcTalk(n, `E로 대화! ${emo} ${weatherHint} (호감 ${rel})`, 54);
+    } else if (!nearPlayer && n.talkTimer <= 0) {
+      const since = state.time - (n.lastMutterAt || 0);
+      if (since > (n.nextMutterGap || 220) && Math.random() < 0.16) {
+        const mutters = [
+          '오늘 동선 괜찮네.',
+          '여기 바람이 좋다.',
+          state.weather === 'rainy' ? '빗소리 들으니 마음이 차분해.' : '해가 좋아서 산책하기 딱이야.',
+          n.state === 'farm' ? '작물이 잘 자라길!' : '조금만 더 둘러보고 쉬어야지.',
+          n.id === 'maru' ? '피어 쪽에서 물고기 그림자 봤어.' : '다음엔 어디로 가볼까?',
+        ];
+        const line = mutters[(state.day + n.name.length + Math.floor(state.time / 140)) % mutters.length];
+        if (!n.recentTalks?.includes(line)) {
+          setNpcTalk(n, line, 70);
+          n.lastMutterAt = state.time;
+          n.nextMutterGap = 180 + Math.floor(Math.random() * 180);
+        }
+      }
     }
   });
 }
@@ -1617,6 +1818,11 @@ function updateCalendar() {
     calcDailyShopStock();
     rollResidentRequests();
     rollDailyBarterOffers();
+    state.npcs.forEach((n) => {
+      n.poiVisitDay = state.day;
+      n.poiVisitsToday = 0;
+      n.visitedPoiToday = {};
+    });
     applyDailyEventEffect();
     if (state.day % 5 === 0 && state.house.tier > 0) {
       const bonus = Math.floor(state.decorScore * 0.6);
