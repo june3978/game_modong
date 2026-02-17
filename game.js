@@ -14,6 +14,7 @@ const ui = {
   modalTitle: document.getElementById('modalTitle'),
   modalBody: document.getElementById('modalBody'),
   modalClose: document.getElementById('modalClose'),
+  btnRender: document.getElementById('btnRender'),
   btnCraft: document.getElementById('btnCraft'),
   btnShop: document.getElementById('btnShop'),
   btnBuild: document.getElementById('btnBuild'),
@@ -94,7 +95,8 @@ const state = {
   museum: { fish: 0, bug: 0, shell: 0, flower: 0 },
   achievements: { bridgeMaster: false, museum10: false, relation90: false },
   decorScore: 0,
-  version: 'v0.5',
+  renderMode: '2d',
+  version: 'v0.6',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -307,17 +309,42 @@ function drawWorld() {
       if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) continue;
       const b = biomes[gy][gx];
       const p = worldToScreen(gx * TILE, gy * TILE);
-      if (b === 'water') ctx.fillStyle = '#5fa6f4';
-      else if (b === 'grove') ctx.fillStyle = '#5ca663';
-      else if (b === 'meadow') ctx.fillStyle = '#7fd26f';
-      else ctx.fillStyle = '#70be67';
-      ctx.fillRect(p.x, p.y, TILE + 1, TILE + 1);
+      if (state.renderMode === '3d') {
+        drawTile3D(p.x, p.y, b);
+      } else {
+        drawTile2D(p.x, p.y, b);
+      }
     }
   }
 
   drawFarmArea();
   if (state.bridgeBuilt) drawBridge();
   drawHouseExterior();
+}
+
+
+function getTileColor(biome) {
+  if (biome === 'water') return '#5fa6f4';
+  if (biome === 'grove') return '#5ca663';
+  if (biome === 'meadow') return '#7fd26f';
+  return '#70be67';
+}
+
+function drawTile2D(x, y, biome) {
+  ctx.fillStyle = getTileColor(biome);
+  ctx.fillRect(x, y, TILE + 1, TILE + 1);
+}
+
+function drawTile3D(x, y, biome) {
+  const h = biome === 'water' ? 5 : biome === 'grove' ? 16 : biome === 'meadow' ? 12 : 10;
+  const baseColor = getTileColor(biome);
+  ctx.fillStyle = baseColor;
+  ctx.fillRect(x, y - h, TILE + 1, TILE + 1);
+
+  ctx.fillStyle = 'rgba(0,0,0,0.15)';
+  ctx.fillRect(x, y + TILE - h, TILE + 1, h);
+  ctx.fillStyle = 'rgba(255,255,255,0.15)';
+  ctx.fillRect(x, y - h, TILE + 1, 6);
 }
 
 function drawFarmArea() {
@@ -419,6 +446,8 @@ function drawHouseInterior() {
       ctx.strokeRect(x - 4, y - 4, 76, 50);
     }
   });
+
+  drawCharacterScreen(canvas.width / 2, canvas.height - 110, '#3b82f6', 'up');
 }
 
 function drawResource(o) {
@@ -447,22 +476,26 @@ function drawFish() {
 
 function drawCharacter(x, y, color, facing = 'down') {
   const p = worldToScreen(x, y);
+  drawCharacterScreen(p.x, p.y, color, facing);
+}
+
+function drawCharacterScreen(x, y, color, facing = 'down') {
   ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
-  ctx.ellipse(p.x, p.y + 16, 12, 5, 0, 0, Math.PI * 2);
+  ctx.ellipse(x, y + 16, 12, 5, 0, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = color;
-  ctx.fillRect(p.x - 9, p.y - 6, 18, 23);
+  ctx.fillRect(x - 9, y - 6, 18, 23);
   ctx.fillStyle = '#ffedd5';
   ctx.beginPath();
-  ctx.arc(p.x, p.y - 12, 8, 0, Math.PI * 2);
+  ctx.arc(x, y - 12, 8, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = '#111827';
-  if (facing === 'left') ctx.fillRect(p.x - 8, p.y - 13, 2, 2);
-  if (facing === 'right') ctx.fillRect(p.x + 6, p.y - 13, 2, 2);
-  if (facing === 'down') { ctx.fillRect(p.x - 5, p.y - 13, 2, 2); ctx.fillRect(p.x + 3, p.y - 13, 2, 2); }
+  if (facing === 'left') ctx.fillRect(x - 8, y - 13, 2, 2);
+  if (facing === 'right') ctx.fillRect(x + 6, y - 13, 2, 2);
+  if (facing === 'down') { ctx.fillRect(x - 5, y - 13, 2, 2); ctx.fillRect(x + 3, y - 13, 2, 2); }
 }
 
 function drawSpeechBubble(actor, text) {
@@ -1046,7 +1079,7 @@ function updateUI() {
   const t = (Math.sin(state.time * 0.0023) + 1) / 2;
   const phase = t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
   state.decorScore = calcDecorScore();
-  ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · 🎉 ${state.dailyEvent} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level} · 🏠 ${state.decorScore} · ${state.version}`;
+  ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · 🎉 ${state.dailyEvent} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level} · 🏠 ${state.decorScore} · ${state.renderMode.toUpperCase()} · ${state.version}`;
   ui.inventory.innerHTML = ITEMS.map(([k, e]) => `<div>${e} ${k}: <b>${state.inv[k]}</b></div>`).join('');
 
   const q = getQuest();
@@ -1095,6 +1128,13 @@ function tick() {
   requestAnimationFrame(tick);
 }
 
+
+function toggleRenderMode() {
+  state.renderMode = state.renderMode === '2d' ? '3d' : '2d';
+  ui.btnRender.textContent = state.renderMode === '3d' ? '🧱 2D뷰' : '🧊 3D뷰';
+  setMsg(state.renderMode === '3d' ? '3D 렌더 모드 활성화' : '2D 렌더 모드 활성화');
+}
+
 window.addEventListener('keydown', (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
@@ -1126,6 +1166,7 @@ window.addEventListener('keyup', (e) => {
   state.keys.delete(key);
 });
 
+ui.btnRender.addEventListener('click', toggleRenderMode);
 ui.btnCraft.addEventListener('click', openCraft);
 ui.btnShop.addEventListener('click', openShop);
 ui.btnBuild.addEventListener('click', openBuild);
@@ -1140,5 +1181,6 @@ rollResidentRequests();
 spawnResources();
 spawnFish();
 initNPCs();
+ui.btnRender.textContent = '🧊 3D뷰';
 updateUI();
 tick();
