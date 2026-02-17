@@ -37,6 +37,8 @@ const WATER = { x1: 31, x2: 46, y1: 8, y2: 23 };
 const BRIDGE = { x1: 32, x2: 44, y: 15 };
 const HOUSE_PLOT = { x: 470, y: 520, w: 180, h: 140 };
 const FARM = { x: 240, y: 560, w: 180, h: 120 };
+const SHOP_PLOT = { x: 980, y: 500, w: 180, h: 130 };
+const MUSEUM_PLOT = { x: 1120, y: 290, w: 210, h: 145 };
 
 const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   Array.from({ length: MAP_W }, (_, gx) => {
@@ -56,7 +58,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v1.4: 모델 교체 + 애니메이션 동작 강화',
+  msg: 'v1.5: 시점기반 조작 + 월드 건물 상호작용 강화',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -99,7 +101,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v1.4',
+  version: 'v1.5',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -807,6 +809,19 @@ function interact() {
     return;
   }
 
+  const shopDoor = { x: SHOP_PLOT.x + 92, y: SHOP_PLOT.y + 102 };
+  const museumDoor = { x: MUSEUM_PLOT.x + 106, y: MUSEUM_PLOT.y + 110 };
+  if (dist(state.player, shopDoor) < 58) {
+    openShop();
+    setMsg('상점에 입장했습니다.');
+    return;
+  }
+  if (dist(state.player, museumDoor) < 62) {
+    openMuseum();
+    setMsg('박물관 접수대로 이동했습니다.');
+    return;
+  }
+
   const nearest = state.npcs.map((n) => ({ n, d: dist(state.player, n) })).sort((a, b) => a.d - b.d)[0];
   if (nearest && nearest.d < 80) {
     const n = nearest.n;
@@ -1018,10 +1033,27 @@ function playerMove() {
   const run = state.keys.has('Shift');
   const spd = (run ? 1.45 : 1) * (state.player.energy > 0 ? state.player.speed : 1.2);
 
-  if (state.keys.has('ArrowUp') || state.keys.has('w')) { dy -= spd; state.player.facing = 'up'; }
-  if (state.keys.has('ArrowDown') || state.keys.has('s')) { dy += spd; state.player.facing = 'down'; }
-  if (state.keys.has('ArrowLeft') || state.keys.has('a')) { dx -= spd; state.player.facing = 'left'; }
-  if (state.keys.has('ArrowRight') || state.keys.has('d')) { dx += spd; state.player.facing = 'right'; }
+  const up = state.keys.has('ArrowUp') || state.keys.has('w');
+  const down = state.keys.has('ArrowDown') || state.keys.has('s');
+  const left = state.keys.has('ArrowLeft') || state.keys.has('a');
+  const right = state.keys.has('ArrowRight') || state.keys.has('d');
+
+  if (state.renderMode === '3d' && !state.house.inside) {
+    const fx = Math.cos(state.camera3d.yaw);
+    const fy = Math.sin(state.camera3d.yaw);
+    const rx = Math.cos(state.camera3d.yaw + Math.PI / 2);
+    const ry = Math.sin(state.camera3d.yaw + Math.PI / 2);
+
+    if (up) { dx += fx * spd; dy += fy * spd; }
+    if (down) { dx -= fx * spd; dy -= fy * spd; }
+    if (left) { dx += rx * spd; dy += ry * spd; }
+    if (right) { dx -= rx * spd; dy -= ry * spd; }
+  } else {
+    if (up) { dy -= spd; state.player.facing = 'up'; }
+    if (down) { dy += spd; state.player.facing = 'down'; }
+    if (left) { dx -= spd; state.player.facing = 'left'; }
+    if (right) { dx += spd; state.player.facing = 'right'; }
+  }
 
   if (state.house.inside) {
     const p = state.house.interiorPlayer;
@@ -1043,6 +1075,11 @@ function playerMove() {
     const nx = clamp(state.player.x + dx, 16, WORLD_W - 16);
     const ny = clamp(state.player.y + dy, 16, WORLD_H - 16);
     if (isWalkable(nx, ny)) { state.player.x = nx; state.player.y = ny; }
+  }
+
+  if ((dx || dy) && state.renderMode === '3d' && !state.house.inside) {
+    if (Math.abs(dx) > Math.abs(dy)) state.player.facing = dx > 0 ? 'right' : 'left';
+    else state.player.facing = dy > 0 ? 'down' : 'up';
   }
 
   const moving = dx || dy;
@@ -1171,10 +1208,26 @@ function createPBRTextureSet(basePath, repeat = [1, 1], fallbackColor = '#8aa08a
 }
 
 function createWorldMaterials() {
-  const grassPBR = createPBRTextureSet('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04', [12, 12], '#7ba06a');
-  const dirtPBR = createPBRTextureSet('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground', [10, 10], '#7d6a4f');
-  const woodPBR = createPBRTextureSet('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood', [4, 4], '#7a6149');
-  const roofPBR = createPBRTextureSet('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02', [3, 3], '#7d3e3e');
+  const grassPBR = {
+    map: createRemoteTexture('https://threejs.org/examples/textures/terrain/grasslight-big.jpg', [12, 12], '#7ba06a'),
+    normalMap: createRemoteTexture('https://threejs.org/examples/textures/terrain/grasslight-big-nm.jpg', [12, 12], '#7f7fff'),
+    roughnessMap: createRemoteTexture('https://threejs.org/examples/textures/terrain/grasslight-big.jpg', [12, 12], '#bcbcbc'),
+  };
+  const dirtPBR = {
+    map: createRemoteTexture('https://threejs.org/examples/textures/terrain/backgrounddetailed6.jpg', [10, 10], '#7d6a4f'),
+    normalMap: createRemoteTexture('https://threejs.org/examples/textures/water/Water_1_M_Normal.jpg', [10, 10], '#7f7fff'),
+    roughnessMap: createRemoteTexture('https://threejs.org/examples/textures/terrain/backgrounddetailed6.jpg', [10, 10], '#bcbcbc'),
+  };
+  const woodPBR = {
+    map: createRemoteTexture('https://threejs.org/examples/textures/hardwood2_diffuse.jpg', [4, 4], '#7a6149'),
+    normalMap: createRemoteTexture('https://threejs.org/examples/textures/hardwood2_bump.jpg', [4, 4], '#7f7fff'),
+    roughnessMap: createRemoteTexture('https://threejs.org/examples/textures/hardwood2_roughness.jpg', [4, 4], '#bcbcbc'),
+  };
+  const roofPBR = {
+    map: createRemoteTexture('https://threejs.org/examples/textures/brick_diffuse.jpg', [3, 3], '#7d3e3e'),
+    normalMap: createRemoteTexture('https://threejs.org/examples/textures/brick_normal.jpg', [3, 3], '#7f7fff'),
+    roughnessMap: createRemoteTexture('https://threejs.org/examples/textures/brick_roughness.jpg', [3, 3], '#bcbcbc'),
+  };
 
   return {
     grass: new THREE.MeshStandardMaterial({ ...grassPBR, roughness: 0.95, metalness: 0.02, envMapIntensity: 0.7 }),
@@ -1386,6 +1439,41 @@ function buildThreeWorld() {
   house.visible = state.house.tier > 0;
   render3d.house = house;
   render3d.world.add(house);
+
+  const shop = new THREE.Group();
+  const shopBase = new THREE.Mesh(new THREE.BoxGeometry(3.6, 2.3, 2.8), mats.wall);
+  shopBase.position.y = 1.45;
+  shopBase.castShadow = true;
+  const shopRoof = new THREE.Mesh(new THREE.ConeGeometry(2.35, 1.35, 4), mats.roof);
+  shopRoof.position.y = 3.15;
+  shopRoof.rotation.y = Math.PI * 0.25;
+  shopRoof.castShadow = true;
+  const sign = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 0.1), new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.6 }));
+  sign.position.set(0, 2.2, 1.42);
+  shop.add(shopBase, shopRoof, sign);
+  shop.position.set(SHOP_PLOT.x / TILE - MAP_W / 2 + 1.8, 0, SHOP_PLOT.y / TILE - MAP_H / 2 + 1.2);
+  render3d.shop = shop;
+  render3d.world.add(shop);
+
+  const museum = new THREE.Group();
+  const museumBase = new THREE.Mesh(new THREE.BoxGeometry(4.2, 2.6, 3.1), mats.wall);
+  museumBase.position.y = 1.6;
+  museumBase.castShadow = true;
+  const museumRoof = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.5, 4), mats.roof);
+  museumRoof.position.y = 3.35;
+  museumRoof.rotation.y = Math.PI * 0.25;
+  museumRoof.castShadow = true;
+  const pillarGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.4, 8);
+  for (let i = -1; i <= 1; i += 1) {
+    const col = new THREE.Mesh(pillarGeo, new THREE.MeshStandardMaterial({ color: '#d6d3d1', roughness: 0.85 }));
+    col.position.set(i * 0.65, 0.8, 1.55);
+    col.castShadow = true;
+    museum.add(col);
+  }
+  museum.add(museumBase, museumRoof);
+  museum.position.set(MUSEUM_PLOT.x / TILE - MAP_W / 2 + 2.1, 0, MUSEUM_PLOT.y / TILE - MAP_H / 2 + 1.2);
+  render3d.museum = museum;
+  render3d.world.add(museum);
 
   render3d.player = createRigCharacter('#3b82f6', '#1e293b', 1);
   render3d.world.add(render3d.player);
@@ -1612,6 +1700,7 @@ function updateUI() {
     textures: { ...render3d.textureStats },
     models: { ...render3d.modelStats },
     mode: state.renderMode,
+    note: 'PolyHaven/Quixel 직접 스크랩 대신 공개 접근 가능한 텍스처 소스 사용',
   };
 
   const t = (Math.sin(state.time * 0.0023) + 1) / 2;
@@ -1725,6 +1814,8 @@ ui.btnShop.addEventListener('click', openShop);
 ui.btnBuild.addEventListener('click', openBuild);
 ui.btnTown.addEventListener('click', openTownBoard);
 ui.btnMuseum.addEventListener('click', openMuseum);
+ui.btnShop.textContent = '🛒 상점(E 근처 입장)';
+ui.btnMuseum.textContent = '🏛️ 박물관(E 근처 입장)';
 ui.modalClose.addEventListener('click', closeModal);
 ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModal(); });
 
