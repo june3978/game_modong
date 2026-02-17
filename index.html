@@ -3,70 +3,52 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>힐링 포레스트: 시뮬레이션 에디션</title>
+  <title>힐링 포레스트: 아일랜드 라이프</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main class="app">
-    <aside class="hud-panel glass">
-      <h1>🌿 힐링 포레스트: 시뮬레이션</h1>
-      <p class="subtitle">월드 시뮬레이션 · NPC AI · 느긋한 생활 루프</p>
+  <main class="game-shell">
+    <header class="top-hud panel">
+      <div class="brand">🌿 힐링 포레스트: 아일랜드 라이프</div>
+      <div class="stats" id="statsBar"></div>
+      <div class="actions">
+        <button id="btnCraft">🔨 제작</button>
+        <button id="btnShop">🛒 상점</button>
+        <button id="btnBuild">🏗️ 건축</button>
+      </div>
+    </header>
 
-      <section class="hud-section">
-        <h2>월드 상태</h2>
-        <div class="stats-grid">
-          <span id="timeLabel">🕒 아침</span>
-          <span id="weatherLabel">☀️ 맑음</span>
-          <span id="energyLabel">⚡ 100</span>
-          <span id="moodLabel">💖 100</span>
-          <span id="coinsLabel">🪙 0</span>
-          <span id="levelLabel">⭐ 1</span>
-        </div>
-      </section>
-
-      <section class="hud-section">
-        <h2>인벤토리</h2>
-        <div class="inv-grid" id="inventory"></div>
-      </section>
-
-      <section class="hud-section">
-        <h2>NPC 라이브 피드</h2>
-        <div id="npcFeed" class="npc-feed"></div>
-      </section>
-
-      <section class="hud-section">
-        <h2>오늘의 목표</h2>
-        <div id="questBox" class="quest-box"></div>
-      </section>
-
-      <section class="hud-section controls">
-        <h2>조작</h2>
-        <ul>
-          <li>이동: WASD / 방향키</li>
-          <li>상호작용: <kbd>E</kbd></li>
-          <li>낚시: <kbd>Space</kbd></li>
-          <li>달리기: <kbd>Shift</kbd></li>
-        </ul>
-      </section>
-
-      <button id="restBtn" class="rest-btn">🛖 캠프에서 휴식</button>
-      <p id="hint" class="hint"></p>
-
-      <section id="dialoguePanel" class="hud-section dialogue hidden">
-        <h2 id="dialogueName">대화</h2>
-        <div id="dialogueText" class="dialogue-text"></div>
-        <div class="dialogue-actions">
-          <button id="dialogueChoiceA" class="dialogue-btn"></button>
-          <button id="dialogueChoiceB" class="dialogue-btn"></button>
-          <button id="dialogueClose" class="dialogue-btn ghost">닫기</button>
-        </div>
-      </section>
-    </aside>
-
-    <section class="world-panel glass">
+    <section class="canvas-wrap panel">
       <canvas id="game" width="1280" height="720" aria-label="2D 힐링 시뮬레이션"></canvas>
+      <div id="fishingUi" class="fishing-ui hidden"></div>
+      <div id="message" class="message"></div>
     </section>
+
+    <aside class="side-hud panel">
+      <h2>🎒 인벤토리</h2>
+      <div id="inventory" class="inventory"></div>
+
+      <h2>📌 목표</h2>
+      <div id="quest" class="quest"></div>
+
+      <h2>🧭 조작</h2>
+      <ul class="controls">
+        <li>이동: WASD / 방향키</li>
+        <li>상호작용: E</li>
+        <li>낚시/타이밍: Space</li>
+        <li>달리기: Shift</li>
+        <li>인테리어 배치: F</li>
+      </ul>
+    </aside>
   </main>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-card panel">
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+      <button id="modalClose">닫기</button>
+    </div>
+  </div>
 
   <script src="game.js"></script>
 </body>

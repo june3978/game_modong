@@ -2,179 +2,106 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
 const ui = {
-  time: document.getElementById('timeLabel'),
-  weather: document.getElementById('weatherLabel'),
-  energy: document.getElementById('energyLabel'),
-  mood: document.getElementById('moodLabel'),
-  coins: document.getElementById('coinsLabel'),
-  level: document.getElementById('levelLabel'),
+  stats: document.getElementById('statsBar'),
   inventory: document.getElementById('inventory'),
-  npcFeed: document.getElementById('npcFeed'),
-  quest: document.getElementById('questBox'),
-  hint: document.getElementById('hint'),
-  restBtn: document.getElementById('restBtn'),
-  dialoguePanel: document.getElementById('dialoguePanel'),
-  dialogueName: document.getElementById('dialogueName'),
-  dialogueText: document.getElementById('dialogueText'),
-  dialogueChoiceA: document.getElementById('dialogueChoiceA'),
-  dialogueChoiceB: document.getElementById('dialogueChoiceB'),
-  dialogueClose: document.getElementById('dialogueClose'),
+  quest: document.getElementById('quest'),
+  message: document.getElementById('message'),
+  fishingUi: document.getElementById('fishingUi'),
+  modal: document.getElementById('modal'),
+  modalTitle: document.getElementById('modalTitle'),
+  modalBody: document.getElementById('modalBody'),
+  modalClose: document.getElementById('modalClose'),
+  btnCraft: document.getElementById('btnCraft'),
+  btnShop: document.getElementById('btnShop'),
+  btnBuild: document.getElementById('btnBuild'),
 };
 
 const TILE = 48;
-const MAP_W = 52;
+const MAP_W = 54;
 const MAP_H = 32;
 const WORLD_W = MAP_W * TILE;
 const WORLD_H = MAP_H * TILE;
 
 const ITEMS = [
-  { key: 'flower', icon: '🌸', label: '꽃', value: 5 },
-  { key: 'berry', icon: '🫐', label: '열매', value: 6 },
-  { key: 'wood', icon: '🪵', label: '목재', value: 4 },
-  { key: 'shell', icon: '🐚', label: '조개', value: 8 },
-  { key: 'fish', icon: '🐟', label: '물고기', value: 12 },
+  ['wood', '🪵'], ['flower', '🌸'], ['berry', '🫐'], ['shell', '🐚'], ['fish', '🐟'], ['furniture', '🪑']
 ];
-
-const AI_LABELS = {
-  idle: '휴식',
-  wander: '산책',
-  gather: '채집',
-  fish: '낚시',
-  social: '대화',
-};
-
-const NPC_DIALOGUE_TEMPLATES = {
-  luna: {
-    greet: '루나: 오늘 숲 공기 진짜 좋다. 같이 산책할래?',
-    moodUp: '루나: 고마워! 네 덕분에 기분이 더 좋아졌어.',
-    questNeed: '루나: 잔치 재료가 아직 모자라. 꽃/물고기/목재를 부탁해!',
-    questDone: '루나: 완벽해! 이걸로 오늘 잔치 준비 끝! 🎉',
-  },
-  bomi: {
-    greet: '보미: 난 채집 루트를 최적화하는 중이야. 같이 할래?',
-    moodUp: '보미: 오, 효율 좋아졌어! 도움이 됐어.',
-    questNeed: '보미: 목재랑 꽃만 좀 더 있으면 돼!',
-    questDone: '보미: 속도전 성공! 준비 완료!',
-  },
-  maru: {
-    greet: '마루: 오늘 입질 괜찮은데? 낚시 팁 알려줄까?',
-    moodUp: '마루: 타이밍 좋았어. 네 감각, 인정!',
-    questNeed: '마루: 물고기가 조금 부족해. 호수 쪽 어때?',
-    questDone: '마루: 오케이, 잔치 메뉴 완성이다!',
-  },
-};
 
 const state = {
   keys: new Set(),
-  player: { x: 420, y: 430, speed: 2.5, energy: 100, mood: 100, anim: 0 },
   camera: { x: 0, y: 0 },
+  time: 0,
   weather: 'sunny',
-  worldTime: 0,
-  dayTick: 0,
-  coins: 0,
-  xp: 0,
+  msg: '연못에 다리를 건설해서 그 위에서 낚시해보세요.',
+  msgTimer: 300,
+  coins: 90,
   level: 1,
-  inventory: Object.fromEntries(ITEMS.map((i) => [i.key, 0])),
+  xp: 0,
+  player: { x: 420, y: 420, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false },
+  inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, furniture: 0 },
   objects: [],
-  fish: [],
-  particles: [],
-  hint: 'NPC들이 AI로 스스로 움직입니다. 가까이 가서 E로 대화해보세요!',
-  hintTimer: 320,
-  aiFeed: [],
+  fishes: [],
   npcs: [],
-  quest: {
-    title: '마을 잔치 준비',
-    needs: { flower: 8, fish: 3, wood: 5 },
-    reward: 220,
-    complete: false,
-  },
-  relationships: { luna: 0, bomi: 0, maru: 0 },
-  dialogue: { open: false, npcId: null, text: '', choices: [] },
+  dialogue: null,
+  bridgeBuilt: false,
+  house: { tier: 0, inside: false, furniture: [], doorX: 520, doorY: 560 },
+  fishing: { active: false, phase: 'idle', timer: 0, biteWindow: 0, cursor: 0.1, dir: 1, zoneStart: 0.45, zoneWidth: 0.2, progress: 0, actor: null },
+  quest: { title: '마을 낚시대회 준비', needs: { fish: 5, wood: 8 }, reward: 220, done: false },
 };
 
-const CAMP = { x: 360, y: 440, w: 220, h: 210 };
-const WATER_BOX = { x1: 30, x2: 46, y1: 8, y2: 23 };
+const WATER = { x1: 31, x2: 46, y1: 8, y2: 23 };
+const BRIDGE = { x1: 36, x2: 40, y: 15 };
+const HOUSE_PLOT = { x: 470, y: 520, w: 180, h: 140 };
 
 const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   Array.from({ length: MAP_W }, (_, gx) => {
-    const noise = Math.sin(gx * 0.27) + Math.cos(gy * 0.31) + Math.random() * 0.7;
-    if (gx > WATER_BOX.x1 && gx < WATER_BOX.x2 && gy > WATER_BOX.y1 && gy < WATER_BOX.y2) return 'water';
-    if (noise > 1.2) return 'meadow';
-    if (noise > 0.35) return 'grass';
+    if (gx > WATER.x1 && gx < WATER.x2 && gy > WATER.y1 && gy < WATER.y2) return 'water';
+    const v = Math.sin(gx * 0.3) + Math.cos(gy * 0.27) + Math.random() * 0.6;
+    if (v > 1.2) return 'meadow';
+    if (v > 0.4) return 'grass';
     return 'grove';
   })
 );
 
-function rnd(min, max) { return Math.random() * (max - min) + min; }
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function rnd(min, max) { return Math.random() * (max - min) + min; }
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+function worldToScreen(x, y) { return { x: x - state.camera.x, y: y - state.camera.y }; }
 
-function worldToScreen(x, y) {
-  return { x: x - state.camera.x, y: y - state.camera.y };
-}
-
-function timePhase() {
-  const t = (Math.sin(state.worldTime * 0.0022) + 1) * 0.5;
-  return t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
-}
-
-function addFeed(text) {
-  state.aiFeed.unshift(`[${timePhase()}] ${text}`);
-  state.aiFeed = state.aiFeed.slice(0, 4);
-}
-
-function setHint(text, ttl = 180) {
-  state.hint = text;
-  state.hintTimer = ttl;
-}
-
-function addParticle(x, y, text, color = 'rgba(255,255,255,ALPHA)') {
-  state.particles.push({ x, y, text, color, life: 70 });
+function setMsg(text, t = 170) {
+  state.msg = text;
+  state.msgTimer = t;
 }
 
 function tileAt(x, y) {
   const gx = Math.floor(clamp(x, 0, WORLD_W - 1) / TILE);
   const gy = Math.floor(clamp(y, 0, WORLD_H - 1) / TILE);
-  return biomes[gy]?.[gx] || 'grass';
+  return { gx, gy, b: biomes[gy]?.[gx] || 'grass' };
+}
+
+function onBridge(x, y) {
+  const t = tileAt(x, y);
+  return state.bridgeBuilt && t.gy === BRIDGE.y && t.gx >= BRIDGE.x1 && t.gx <= BRIDGE.x2;
 }
 
 function isWalkable(x, y) {
-  return tileAt(x, y) !== 'water';
+  const t = tileAt(x, y);
+  if (t.b !== 'water') return true;
+  return onBridge(x, y);
 }
 
-function itemMeta(key) {
-  return ITEMS.find((it) => it.key === key);
-}
-
-function randomLandPos() {
-  let x = rnd(60, WORLD_W - 60);
-  let y = rnd(60, WORLD_H - 60);
-  let guard = 0;
-  while (!isWalkable(x, y) && guard < 20) {
-    x = rnd(60, WORLD_W - 60);
-    y = rnd(60, WORLD_H - 60);
-    guard += 1;
-  }
-  return { x, y };
-}
-
-function spawnWorldObjects() {
+function spawnResources() {
   const list = [];
-  for (let gy = 1; gy < MAP_H - 1; gy++) {
-    for (let gx = 1; gx < MAP_W - 1; gx++) {
-      const biome = biomes[gy][gx];
-      if (biome === 'water') {
-        if (Math.random() < 0.025) {
-          list.push({ kind: 'shell', x: gx * TILE + rnd(8, TILE - 8), y: gy * TILE + rnd(8, TILE - 8), bob: rnd(0, Math.PI * 2) });
-        }
+  for (let y = 1; y < MAP_H - 1; y++) {
+    for (let x = 1; x < MAP_W - 1; x++) {
+      const b = biomes[y][x];
+      if (b === 'water') {
+        if (Math.random() < 0.03) list.push({ type: 'shell', x: x * TILE + rnd(8, TILE - 8), y: y * TILE + rnd(8, TILE - 8), bob: rnd(0, 6.28) });
         continue;
       }
-      const chance = biome === 'meadow' ? 0.13 : biome === 'grove' ? 0.11 : 0.09;
-      if (Math.random() < chance) {
-        const kind = biome === 'grove'
-          ? (Math.random() > 0.52 ? 'wood' : 'berry')
-          : (Math.random() > 0.4 ? 'flower' : 'berry');
-        list.push({ kind, x: gx * TILE + rnd(8, TILE - 8), y: gy * TILE + rnd(8, TILE - 8), bob: rnd(0, Math.PI * 2) });
+      const c = b === 'grove' ? 0.12 : 0.1;
+      if (Math.random() < c) {
+        const type = b === 'grove' ? (Math.random() > 0.5 ? 'wood' : 'berry') : (Math.random() > 0.5 ? 'flower' : 'berry');
+        list.push({ type, x: x * TILE + rnd(8, TILE - 8), y: y * TILE + rnd(8, TILE - 8), bob: rnd(0, 6.28) });
       }
     }
   }
@@ -182,248 +109,27 @@ function spawnWorldObjects() {
 }
 
 function spawnFish() {
-  state.fish = Array.from({ length: 18 }, () => ({
-    x: rnd((WATER_BOX.x1 + 1) * TILE, (WATER_BOX.x2 - 1) * TILE),
-    y: rnd((WATER_BOX.y1 + 1) * TILE, (WATER_BOX.y2 - 1) * TILE),
+  state.fishes = Array.from({ length: 20 }, () => ({
+    x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE),
+    y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE),
     dir: Math.random() > 0.5 ? 1 : -1,
-    speed: rnd(0.35, 1.1),
+    spd: rnd(0.5, 1.1),
   }));
 }
 
-function createNPCs() {
+function initNPCs() {
   state.npcs = [
-    {
-      id: 'luna',
-      name: '루나',
-      color: '#f59e0b',
-      x: 840,
-      y: 660,
-      speed: 1.25,
-      mood: 86,
-      energy: 84,
-      sociability: 0.72,
-      roleBias: { gather: 1.2, fish: 0.7, social: 1.6, wander: 1.0, idle: 0.8 },
-      ai: { state: 'wander', thinkCooldown: 0, target: null, pulse: rnd(0, Math.PI * 2), talkCooldown: 0 },
-    },
-    {
-      id: 'bomi',
-      name: '보미',
-      color: '#22c55e',
-      x: 1100,
-      y: 520,
-      speed: 1.38,
-      mood: 82,
-      energy: 80,
-      sociability: 0.45,
-      roleBias: { gather: 1.5, fish: 0.6, social: 0.8, wander: 1.1, idle: 0.7 },
-      ai: { state: 'gather', thinkCooldown: 0, target: null, pulse: rnd(0, Math.PI * 2), talkCooldown: 0 },
-    },
-    {
-      id: 'maru',
-      name: '마루',
-      color: '#60a5fa',
-      x: 1560,
-      y: 720,
-      speed: 1.3,
-      mood: 78,
-      energy: 88,
-      sociability: 0.55,
-      roleBias: { gather: 0.9, fish: 1.6, social: 1.0, wander: 1.0, idle: 0.9 },
-      ai: { state: 'fish', thinkCooldown: 0, target: null, pulse: rnd(0, Math.PI * 2), talkCooldown: 0 },
-    },
+    { id: 'luna', name: '루나', x: 820, y: 690, color: '#f59e0b', mood: 84, state: 'wander', target: null, pause: false, talk: '' },
+    { id: 'bomi', name: '보미', x: 1020, y: 620, color: '#22c55e', mood: 80, state: 'wander', target: null, pause: false, talk: '' },
+    { id: 'maru', name: '마루', x: 1430, y: 760, color: '#60a5fa', mood: 82, state: 'fish', target: null, pause: false, talk: '' },
   ];
 }
 
-function chooseBehavior(npc) {
-  const p = timePhase();
-  const waterDist = Math.abs(npc.x - ((WATER_BOX.x1 + WATER_BOX.x2) * TILE * 0.5));
-
-  const utility = {
-    idle: (100 - npc.energy) * 0.5 + (p === '밤' ? 12 : 0),
-    wander: npc.mood * 0.2 + npc.roleBias.wander * 8,
-    gather: npc.energy * 0.14 + npc.roleBias.gather * 13 + (state.objects.length > 120 ? 8 : 0),
-    fish: npc.energy * 0.12 + npc.roleBias.fish * 15 + (waterDist < 320 ? 8 : 0),
-    social: npc.mood * npc.sociability * 0.3 + npc.roleBias.social * 12,
-  };
-
-  const entries = Object.entries(utility).sort((a, b) => b[1] - a[1]);
-  const winner = entries[0][0];
-  npc.ai.state = winner;
-
-  if (winner === 'wander' || winner === 'social') {
-    npc.ai.target = randomLandPos();
-  }
-
-  if (winner === 'gather') {
-    npc.ai.target = nearestObject(npc, (o) => o.kind !== 'shell') || randomLandPos();
-  }
-
-  if (winner === 'fish') {
-    npc.ai.target = {
-      x: rnd((WATER_BOX.x1 + 1) * TILE, (WATER_BOX.x2 - 1) * TILE),
-      y: rnd((WATER_BOX.y1 + 1) * TILE, (WATER_BOX.y2 - 1) * TILE),
-      edge: true,
-    };
-  }
-
-  if (winner === 'idle') {
-    npc.ai.target = { x: CAMP.x + rnd(20, CAMP.w - 20), y: CAMP.y + rnd(20, CAMP.h - 20) };
-  }
-
-  addFeed(`${npc.name} AI → ${AI_LABELS[winner]}`);
-}
-
-function nearestObject(actor, predicate) {
-  let best = null;
-  let d = Infinity;
-  state.objects.forEach((o) => {
-    if (!predicate(o)) return;
-    const nd = dist(actor, o);
-    if (nd < d) {
-      d = nd;
-      best = o;
-    }
-  });
-  return best;
-}
-
-function moveAgent(npc, target, speedMul = 1) {
-  if (!target) return;
-  const dx = target.x - npc.x;
-  const dy = target.y - npc.y;
-  const len = Math.hypot(dx, dy);
-  if (len < 2) return;
-
-  const vx = (dx / len) * npc.speed * speedMul;
-  const vy = (dy / len) * npc.speed * speedMul;
-  const nx = clamp(npc.x + vx, 16, WORLD_W - 16);
-  const ny = clamp(npc.y + vy, 16, WORLD_H - 16);
-
-  if (isWalkable(nx, ny) || npc.ai.state === 'fish') {
-    npc.x = nx;
-    npc.y = ny;
-  }
-}
-
-function npcGather(npc) {
-  const target = npc.ai.target;
-  if (!target || !('kind' in target)) {
-    npc.ai.target = nearestObject(npc, (o) => o.kind !== 'shell') || randomLandPos();
-    return;
-  }
-
-  moveAgent(npc, target, 1.08);
-  if (dist(npc, target) < 20) {
-    const m = itemMeta(target.kind);
-    state.objects = state.objects.filter((o) => o !== target);
-    npc.energy = clamp(npc.energy - 4, 0, 100);
-    npc.mood = clamp(npc.mood + 2.5, 0, 100);
-    addParticle(npc.x, npc.y - 12, `${npc.name} +${m.icon}`, 'rgba(254, 240, 138, ALPHA)');
-    npc.ai.target = nearestObject(npc, (o) => o.kind !== 'shell');
-    if (!npc.ai.target) npc.ai.target = randomLandPos();
-  }
-}
-
-function npcFish(npc) {
-  if (!npc.ai.target) {
-    npc.ai.target = {
-      x: rnd((WATER_BOX.x1 + 1) * TILE, (WATER_BOX.x2 - 1) * TILE),
-      y: rnd((WATER_BOX.y1 + 1) * TILE, (WATER_BOX.y2 - 1) * TILE),
-    };
-  }
-  moveAgent(npc, npc.ai.target, 0.95);
-
-  if (dist(npc, npc.ai.target) < 34 && Math.random() < 0.008) {
-    npc.energy = clamp(npc.energy - 2.4, 0, 100);
-    npc.mood = clamp(npc.mood + 1.5, 0, 100);
-    addParticle(npc.x, npc.y - 10, `${npc.name} 낚시 성공 🐟`, 'rgba(191, 219, 254, ALPHA)');
-    npc.ai.target = {
-      x: rnd((WATER_BOX.x1 + 1) * TILE, (WATER_BOX.x2 - 1) * TILE),
-      y: rnd((WATER_BOX.y1 + 1) * TILE, (WATER_BOX.y2 - 1) * TILE),
-    };
-  }
-}
-
-function npcSocial(npc) {
-  let closest = null;
-  let cd = Infinity;
-  state.npcs.forEach((other) => {
-    if (other.id === npc.id) return;
-    const d = dist(npc, other);
-    if (d < cd) {
-      cd = d;
-      closest = other;
-    }
-  });
-
-  if (!closest) {
-    npc.ai.target = randomLandPos();
-    moveAgent(npc, npc.ai.target);
-    return;
-  }
-
-  moveAgent(npc, closest, 1.03);
-  if (cd < 44 && npc.ai.talkCooldown <= 0) {
-    npc.mood = clamp(npc.mood + 3.8, 0, 100);
-    closest.mood = clamp(closest.mood + 3.8, 0, 100);
-    npc.ai.talkCooldown = 160;
-    addFeed(`${npc.name} ↔ ${closest.name}: 오늘 기분 좋다!`);
-    addParticle(npc.x, npc.y - 16, '💬', 'rgba(255,255,255,ALPHA)');
-  }
-}
-
-function npcWander(npc) {
-  if (!npc.ai.target || dist(npc, npc.ai.target) < 24) {
-    npc.ai.target = randomLandPos();
-  }
-  moveAgent(npc, npc.ai.target, 0.95);
-  npc.energy = clamp(npc.energy - 0.012, 0, 100);
-  npc.mood = clamp(npc.mood + 0.02, 0, 100);
-}
-
-function npcIdle(npc) {
-  if (!npc.ai.target || dist(npc, npc.ai.target) < 18) {
-    npc.ai.target = { x: CAMP.x + rnd(24, CAMP.w - 24), y: CAMP.y + rnd(24, CAMP.h - 24) };
-  }
-  moveAgent(npc, npc.ai.target, 0.55);
-  npc.energy = clamp(npc.energy + 0.06, 0, 100);
-  npc.mood = clamp(npc.mood + 0.01, 0, 100);
-}
-
-function updateNPCs() {
-  state.npcs.forEach((npc) => {
-    npc.ai.pulse += 0.08;
-    npc.ai.thinkCooldown -= 1;
-    npc.ai.talkCooldown -= 1;
-
-    if (npc.ai.thinkCooldown <= 0) {
-      chooseBehavior(npc);
-      npc.ai.thinkCooldown = 250 + Math.floor(Math.random() * 140);
-    }
-
-    if (npc.ai.state === 'gather') npcGather(npc);
-    if (npc.ai.state === 'fish') npcFish(npc);
-    if (npc.ai.state === 'social') npcSocial(npc);
-    if (npc.ai.state === 'wander') npcWander(npc);
-    if (npc.ai.state === 'idle') npcIdle(npc);
-
-    npc.energy = clamp(npc.energy + (npc.ai.state === 'idle' ? 0.03 : -0.007), 0, 100);
-    if (npc.energy < 18 && npc.ai.state !== 'idle') {
-      npc.ai.state = 'idle';
-      npc.ai.target = { x: CAMP.x + rnd(24, CAMP.w - 24), y: CAMP.y + rnd(24, CAMP.h - 24) };
-      npc.ai.thinkCooldown = 120;
-      addFeed(`${npc.name} 에너지가 부족해서 휴식 중`);
-    }
-  });
-}
-
 function drawWorld() {
-  const day = (Math.sin(state.worldTime * 0.0022) + 1) * 0.5;
-  const rain = state.weather === 'rainy' ? 1 : 0;
-
+  const day = (Math.sin(state.time * 0.0023) + 1) / 2;
   const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  sky.addColorStop(0, `rgb(${68 + day * 110}, ${118 + day * 82}, ${198 - day * 74})`);
-  sky.addColorStop(1, `rgb(${76 + day * 42}, ${175 + day * 48}, ${122 + day * 44})`);
+  sky.addColorStop(0, `rgb(${70 + day * 100},${120 + day * 80},${185 - day * 70})`);
+  sky.addColorStop(1, `rgb(${75 + day * 45},${170 + day * 40},${116 + day * 40})`);
   ctx.fillStyle = sky;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
@@ -435,66 +141,100 @@ function drawWorld() {
   for (let gy = sy; gy < ey; gy++) {
     for (let gx = sx; gx < ex; gx++) {
       if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) continue;
-      const biome = biomes[gy][gx];
-      const x = gx * TILE - state.camera.x;
-      const y = gy * TILE - state.camera.y;
-      const tint = day * 26 - rain * 10;
-
-      if (biome === 'water') ctx.fillStyle = `rgb(${65 + tint}, ${128 + tint}, ${198 + tint})`;
-      else if (biome === 'meadow') ctx.fillStyle = `rgb(${109 + tint}, ${206 + tint}, ${122 + tint})`;
-      else if (biome === 'grove') ctx.fillStyle = `rgb(${84 + tint}, ${160 + tint}, ${95 + tint})`;
-      else ctx.fillStyle = `rgb(${96 + tint}, ${184 + tint}, ${107 + tint})`;
-      ctx.fillRect(x, y, TILE + 1, TILE + 1);
-
-      if (biome === 'water') {
-        ctx.strokeStyle = 'rgba(255,255,255,0.15)';
-        ctx.beginPath();
-        ctx.arc(x + TILE * 0.5, y + TILE * 0.5, 12 + Math.sin(state.worldTime * 0.06 + gx) * 4, 0, Math.PI * 2);
-        ctx.stroke();
-      }
+      const b = biomes[gy][gx];
+      const p = worldToScreen(gx * TILE, gy * TILE);
+      if (b === 'water') ctx.fillStyle = '#5fa6f4';
+      else if (b === 'grove') ctx.fillStyle = '#5ca663';
+      else if (b === 'meadow') ctx.fillStyle = '#7fd26f';
+      else ctx.fillStyle = '#70be67';
+      ctx.fillRect(p.x, p.y, TILE + 1, TILE + 1);
     }
   }
 
-  drawCamp();
+  if (state.bridgeBuilt) drawBridge();
+  drawHouseExterior();
 }
 
-function drawCamp() {
-  const c = worldToScreen(CAMP.x, CAMP.y);
-  ctx.fillStyle = '#7b3f12';
-  ctx.fillRect(c.x + 18, c.y + 34, 130, 100);
-  ctx.fillStyle = '#5d2d0d';
+function drawBridge() {
+  const x = BRIDGE.x1 * TILE;
+  const y = BRIDGE.y * TILE;
+  const p = worldToScreen(x, y);
+  const w = (BRIDGE.x2 - BRIDGE.x1 + 1) * TILE;
+  ctx.fillStyle = '#8b5a2b';
+  ctx.fillRect(p.x, p.y + 8, w, TILE - 16);
+  ctx.strokeStyle = '#5b3719';
+  for (let i = 0; i <= w; i += 24) {
+    ctx.beginPath();
+    ctx.moveTo(p.x + i, p.y + 8);
+    ctx.lineTo(p.x + i, p.y + TILE - 8);
+    ctx.stroke();
+  }
+}
+
+function drawHouseExterior() {
+  const p = worldToScreen(HOUSE_PLOT.x, HOUSE_PLOT.y);
+  if (state.house.tier === 0) {
+    ctx.fillStyle = 'rgba(255,255,255,0.5)';
+    ctx.fillRect(p.x, p.y, HOUSE_PLOT.w, HOUSE_PLOT.h);
+    ctx.strokeStyle = '#64748b';
+    ctx.setLineDash([8, 6]);
+    ctx.strokeRect(p.x, p.y, HOUSE_PLOT.w, HOUSE_PLOT.h);
+    ctx.setLineDash([]);
+    ctx.fillStyle = '#1f2937';
+    ctx.fillText('집 부지 (건설 가능)', p.x + 24, p.y + 74);
+    return;
+  }
+
+  const bodyColor = state.house.tier === 1 ? '#b45309' : '#7c3f11';
+  const roofColor = state.house.tier === 1 ? '#92400e' : '#5b2d0d';
+  ctx.fillStyle = bodyColor;
+  ctx.fillRect(p.x + 20, p.y + 36, 140, 95);
+  ctx.fillStyle = roofColor;
   ctx.beginPath();
-  ctx.moveTo(c.x + 8, c.y + 36);
-  ctx.lineTo(c.x + 84, c.y - 20);
-  ctx.lineTo(c.x + 160, c.y + 36);
+  ctx.moveTo(p.x + 8, p.y + 38);
+  ctx.lineTo(p.x + 90, p.y - 20);
+  ctx.lineTo(p.x + 172, p.y + 38);
   ctx.closePath();
   ctx.fill();
 
-  ctx.fillStyle = '#f59e0b';
-  ctx.beginPath();
-  ctx.arc(c.x + 182, c.y + 112, 10 + Math.sin(state.worldTime * 0.1) * 2, 0, Math.PI * 2);
-  ctx.fill();
+  ctx.fillStyle = '#fde68a';
+  ctx.fillRect(p.x + 79, p.y + 86, 22, 45);
+  state.house.doorX = HOUSE_PLOT.x + 90;
+  state.house.doorY = HOUSE_PLOT.y + 120;
+}
+
+function drawHouseInterior() {
+  ctx.fillStyle = '#eadfc7';
+  ctx.fillRect(0, 0, canvas.width, canvas.height);
+  ctx.fillStyle = '#d4c2a3';
+  for (let y = 0; y < canvas.height; y += 40) ctx.fillRect(0, y, canvas.width, 2);
+
+  ctx.fillStyle = '#7c3f11';
+  ctx.fillRect(canvas.width / 2 - 40, canvas.height - 30, 80, 20);
+  ctx.fillStyle = '#1f2937';
+  ctx.fillText('E : 집 나가기', canvas.width / 2 - 45, canvas.height - 40);
+
+  state.house.furniture.forEach((f) => {
+    const x = 240 + f.gx * 120;
+    const y = 140 + f.gy * 110;
+    ctx.fillStyle = '#8b5a2b';
+    ctx.fillRect(x, y, 70, 42);
+    ctx.fillStyle = '#fff';
+    ctx.fillText('🪑', x + 20, y + 28);
+  });
 }
 
 function drawResource(o) {
-  const p = worldToScreen(o.x, o.y + Math.sin(state.worldTime * 0.05 + o.bob) * 2);
-  if (p.x < -30 || p.y < -30 || p.x > canvas.width + 30 || p.y > canvas.height + 30) return;
-  const meta = itemMeta(o.kind);
-
-  ctx.fillStyle = 'rgba(0,0,0,0.16)';
-  ctx.beginPath();
-  ctx.ellipse(p.x, p.y + 8, 10, 4.5, 0, 0, Math.PI * 2);
-  ctx.fill();
-
-  ctx.font = '20px serif';
-  ctx.fillText(meta.icon, p.x - 10, p.y + 6);
+  const p = worldToScreen(o.x, o.y + Math.sin(state.time * 0.05 + o.bob) * 2);
+  if (p.x < -20 || p.y < -20 || p.x > canvas.width + 20 || p.y > canvas.height + 20) return;
+  const emoji = ITEMS.find(([k]) => k === o.type)?.[1] || '•';
+  ctx.fillText(emoji, p.x - 8, p.y + 6);
 }
 
 function drawFish() {
-  state.fish.forEach((f) => {
+  state.fishes.forEach((f) => {
     const p = worldToScreen(f.x, f.y);
-    if (p.x < -30 || p.y < -30 || p.x > canvas.width + 30 || p.y > canvas.height + 30) return;
-
+    if (p.x < -20 || p.y < -20 || p.x > canvas.width + 20 || p.y > canvas.height + 20) return;
     ctx.save();
     ctx.translate(p.x, p.y);
     ctx.scale(f.dir, 1);
@@ -503,262 +243,69 @@ function drawFish() {
     ctx.ellipse(0, 0, 10, 6, 0, 0, Math.PI * 2);
     ctx.fill();
     ctx.beginPath();
-    ctx.moveTo(-9, 0);
-    ctx.lineTo(-15, -5);
-    ctx.lineTo(-15, 5);
-    ctx.closePath();
-    ctx.fill();
+    ctx.moveTo(-9, 0); ctx.lineTo(-15, -5); ctx.lineTo(-15, 5); ctx.closePath(); ctx.fill();
     ctx.restore();
   });
 }
 
-function drawAgentBody(x, y, color, bob) {
-  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+function drawCharacter(x, y, color, facing = 'down') {
+  const p = worldToScreen(x, y);
+  ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
-  ctx.ellipse(x, y + 16, 13, 5, 0, 0, Math.PI * 2);
+  ctx.ellipse(p.x, p.y + 16, 12, 5, 0, 0, Math.PI * 2);
   ctx.fill();
 
   ctx.fillStyle = color;
-  ctx.fillRect(x - 9, y - 6 + bob, 18, 23);
+  ctx.fillRect(p.x - 9, p.y - 6, 18, 23);
   ctx.fillStyle = '#ffedd5';
   ctx.beginPath();
-  ctx.arc(x, y - 12 + bob, 8, 0, Math.PI * 2);
+  ctx.arc(p.x, p.y - 12, 8, 0, Math.PI * 2);
   ctx.fill();
+
+  ctx.fillStyle = '#111827';
+  if (facing === 'left') ctx.fillRect(p.x - 8, p.y - 13, 2, 2);
+  if (facing === 'right') ctx.fillRect(p.x + 6, p.y - 13, 2, 2);
+  if (facing === 'down') { ctx.fillRect(p.x - 5, p.y - 13, 2, 2); ctx.fillRect(p.x + 3, p.y - 13, 2, 2); }
 }
 
-function drawNPC(npc) {
-  const p = worldToScreen(npc.x, npc.y);
-  const bob = Math.sin(npc.ai.pulse) * 1.4;
-  drawAgentBody(p.x, p.y, npc.color, bob);
-
-  if (dist(state.player, npc) < 95) {
-    ctx.fillStyle = 'rgba(255,255,255,0.75)';
-    ctx.fillRect(p.x - 44, p.y - 48, 88, 22);
-    ctx.fillStyle = '#111827';
-    ctx.font = '12px sans-serif';
-    ctx.fillText(`E 대화 · ${AI_LABELS[npc.ai.state]}`, p.x - 38, p.y - 33);
-  }
+function drawSpeechBubble(actor, text) {
+  if (!text) return;
+  const p = worldToScreen(actor.x, actor.y);
+  const w = Math.max(120, Math.min(240, text.length * 10));
+  const x = p.x - w / 2;
+  const y = p.y - 62;
+  ctx.fillStyle = 'rgba(255,255,255,0.9)';
+  ctx.fillRect(x, y, w, 28);
+  ctx.beginPath();
+  ctx.moveTo(p.x - 6, y + 28); ctx.lineTo(p.x + 6, y + 28); ctx.lineTo(p.x, y + 36); ctx.closePath();
+  ctx.fill();
+  ctx.fillStyle = '#111827';
+  ctx.font = '12px sans-serif';
+  ctx.fillText(text.slice(0, 24), x + 8, y + 18);
 }
 
-function drawPlayer() {
+function drawDialogueChoices() {
+  if (!state.dialogue) return;
   const p = worldToScreen(state.player.x, state.player.y);
-  state.player.anim += state.keys.size ? 0.24 : 0.08;
-  const bob = Math.sin(state.player.anim) * 2;
-  drawAgentBody(p.x, p.y, '#2563eb', bob);
+  ctx.fillStyle = 'rgba(15,23,42,0.84)';
+  ctx.fillRect(p.x - 180, p.y + 40, 360, 74);
+  ctx.fillStyle = '#fff';
+  ctx.fillText(`1) ${state.dialogue.a}`, p.x - 166, p.y + 62);
+  ctx.fillText(`2) ${state.dialogue.b}`, p.x - 166, p.y + 88);
 }
 
-function drawParticles() {
-  state.particles = state.particles.filter((p) => p.life > 0);
-  state.particles.forEach((p) => {
-    p.life -= 1;
-    p.y -= 0.35;
-    const s = worldToScreen(p.x, p.y);
-    const alpha = (p.life / 70).toFixed(2);
-    ctx.fillStyle = p.color.replace('ALPHA', alpha);
-    ctx.font = 'bold 14px sans-serif';
-    ctx.fillText(p.text, s.x - 8, s.y);
+function facingTo(a, b) {
+  if (Math.abs(a.x - b.x) > Math.abs(a.y - b.y)) return a.x < b.x ? 'right' : 'left';
+  return a.y < b.y ? 'down' : 'up';
+}
+
+function drawAllCharacters() {
+  state.npcs.forEach((n) => {
+    drawCharacter(n.x, n.y, n.color, n.facing || 'down');
+    drawSpeechBubble(n, n.talk);
   });
-}
-
-function drawWeather() {
-  if (state.weather !== 'rainy') return;
-  ctx.strokeStyle = 'rgba(191, 219, 254, 0.58)';
-  for (let i = 0; i < 140; i++) {
-    const x = (i * 93 + state.worldTime * 3) % (canvas.width + 40);
-    const y = (i * 47 + state.worldTime * 5) % (canvas.height + 40);
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.lineTo(x - 4, y + 10);
-    ctx.stroke();
-  }
-}
-
-function updateFish() {
-  state.fish.forEach((f) => {
-    f.x += f.speed * f.dir;
-    if (f.x < (WATER_BOX.x1 + 1) * TILE || f.x > (WATER_BOX.x2 - 1) * TILE) f.dir *= -1;
-  });
-}
-
-function collectNearby() {
-  let gain = 0;
-  state.objects = state.objects.filter((o) => {
-    if (dist(state.player, o) < 21) {
-      const m = itemMeta(o.kind);
-      state.inventory[o.kind] += 1;
-      state.xp += m.value;
-      gain += m.value;
-      addParticle(o.x, o.y, `+1 ${m.icon}`);
-      return false;
-    }
-    return true;
-  });
-
-  if (gain > 0) setHint(`채집 성공! 경험치 +${gain}`);
-  if (state.objects.length < 130) spawnWorldObjects();
-}
-
-function nearWater(actor) {
-  return tileAt(actor.x + 28, actor.y) === 'water' || tileAt(actor.x - 28, actor.y) === 'water';
-}
-
-function fishAction() {
-  if (!nearWater(state.player)) {
-    setHint('호수 가장자리에서 스페이스로 낚시할 수 있어요.');
-    return;
-  }
-
-  if (Math.random() > 0.42) {
-    state.inventory.fish += 1;
-    const bonus = Math.floor(rnd(10, 20));
-    state.xp += bonus;
-    addParticle(state.player.x, state.player.y - 10, '+1 🐟', 'rgba(191, 219, 254, ALPHA)');
-    setHint(`낚시 성공! 경험치 +${bonus}`);
-  } else {
-    state.player.energy = clamp(state.player.energy - 3, 0, 100);
-    setHint('물고기가 도망갔어요. 다시 시도해보세요.');
-  }
-}
-
-function inCamp(actor = state.player) {
-  return actor.x > CAMP.x && actor.x < CAMP.x + CAMP.w && actor.y > CAMP.y && actor.y < CAMP.y + CAMP.h;
-}
-
-function rest() {
-  if (!inCamp()) {
-    setHint('캠프 근처에서만 휴식할 수 있어요.');
-    return;
-  }
-  state.player.energy = 100;
-  state.player.mood = clamp(state.player.mood + 15, 0, 100);
-  state.worldTime += 480;
-  setHint('푹 쉬었습니다. 마음이 한결 가벼워졌어요.');
-}
-
-function closeDialogue() {
-  state.dialogue.open = false;
-  state.dialogue.npcId = null;
-  ui.dialoguePanel.classList.add('hidden');
-}
-
-function openDialogue(npc) {
-  const script = NPC_DIALOGUE_TEMPLATES[npc.id];
-  const needs = state.quest.needs;
-  const done = Object.entries(needs).every(([k, v]) => state.inventory[k] >= v);
-
-  state.dialogue.open = true;
-  state.dialogue.npcId = npc.id;
-
-  const baseText = state.quest.complete
-    ? `${script.greet}\n(친밀도 ${state.relationships[npc.id]})`
-    : done ? script.questDone : script.questNeed;
-
-  state.dialogue.text = baseText;
-  state.dialogue.choices = [
-    {
-      label: state.quest.complete ? '잡담하기 (+기분)' : done ? '재료 전달하기' : '도움 약속하기',
-      action: 'main',
-    },
-    {
-      label: '선물하기(열매 1개)',
-      action: 'gift',
-    },
-  ];
-
-  ui.dialogueName.textContent = `${npc.name}와 대화`;
-  ui.dialogueText.textContent = state.dialogue.text;
-  ui.dialogueChoiceA.textContent = `1) ${state.dialogue.choices[0].label}`;
-  ui.dialogueChoiceB.textContent = `2) ${state.dialogue.choices[1].label}`;
-  ui.dialoguePanel.classList.remove('hidden');
-}
-
-function applyDialogueChoice(choiceIdx) {
-  if (!state.dialogue.open) return;
-  const npc = state.npcs.find((n) => n.id === state.dialogue.npcId);
-  if (!npc) return;
-
-  const choice = state.dialogue.choices[choiceIdx];
-  if (!choice) return;
-
-  const script = NPC_DIALOGUE_TEMPLATES[npc.id];
-  const needs = state.quest.needs;
-  const done = Object.entries(needs).every(([k, v]) => state.inventory[k] >= v);
-
-  if (choice.action === 'main') {
-    if (!state.quest.complete && done) {
-      Object.entries(needs).forEach(([k, v]) => { state.inventory[k] -= v; });
-      state.quest.complete = true;
-      state.coins += state.quest.reward;
-      state.xp += 120;
-      ui.dialogueText.textContent = script.questDone + ` 코인 +${state.quest.reward}`;
-      setHint(`${npc.name}에게 재료를 전달했어요!`, 200);
-    } else {
-      npc.mood = clamp(npc.mood + 6, 0, 100);
-      state.player.mood = clamp(state.player.mood + 4, 0, 100);
-      state.relationships[npc.id] += 1;
-      ui.dialogueText.textContent = script.moodUp + ` (친밀도 ${state.relationships[npc.id]})`;
-      addFeed(`${npc.name}과(와) 대화로 친밀도 상승`);
-    }
-  }
-
-  if (choice.action === 'gift') {
-    if (state.inventory.berry > 0) {
-      state.inventory.berry -= 1;
-      npc.mood = clamp(npc.mood + 9, 0, 100);
-      state.relationships[npc.id] += 2;
-      addParticle(npc.x, npc.y - 12, '🎁', 'rgba(253, 230, 138, ALPHA)');
-      ui.dialogueText.textContent = `${npc.name}: 선물 고마워! (친밀도 ${state.relationships[npc.id]})`;
-      setHint('NPC에게 선물을 건넸습니다.', 180);
-    } else {
-      ui.dialogueText.textContent = '열매가 부족해요. 채집해서 다시 와주세요.';
-    }
-  }
-}
-
-function interact() {
-  const nearest = state.npcs
-    .map((n) => ({ n, d: dist(state.player, n) }))
-    .sort((a, b) => a.d - b.d)[0];
-
-  if (nearest && nearest.d < 95) {
-    openDialogue(nearest.n);
-    return;
-  }
-
-  if (inCamp()) {
-    state.player.energy = clamp(state.player.energy + 12, 0, 100);
-    state.player.mood = clamp(state.player.mood + 8, 0, 100);
-    setHint('캠프 정리를 하며 휴식을 취했습니다.');
-  }
-}
-
-function playerMove() {
-  const p = state.player;
-  const running = state.keys.has('Shift');
-  const speed = (running ? 1.45 : 1) * (p.energy > 0 ? p.speed : 1.2);
-
-  let dx = 0;
-  let dy = 0;
-  if (state.keys.has('ArrowUp') || state.keys.has('w')) dy -= speed;
-  if (state.keys.has('ArrowDown') || state.keys.has('s')) dy += speed;
-  if (state.keys.has('ArrowLeft') || state.keys.has('a')) dx -= speed;
-  if (state.keys.has('ArrowRight') || state.keys.has('d')) dx += speed;
-
-  const nx = clamp(p.x + dx, 16, WORLD_W - 16);
-  const ny = clamp(p.y + dy, 16, WORLD_H - 16);
-  if (isWalkable(nx, ny)) {
-    p.x = nx;
-    p.y = ny;
-  }
-
-  const moving = dx !== 0 || dy !== 0;
-  if (moving) {
-    p.energy = clamp(p.energy - (running ? 0.08 : 0.045), 0, 100);
-    p.mood = clamp(p.mood + 0.013, 0, 100);
-  } else {
-    p.energy = clamp(p.energy + 0.036, 0, 100);
-    p.mood = clamp(p.mood - 0.005, 0, 100);
-  }
+  drawCharacter(state.player.x, state.player.y, '#2563eb', state.player.facing);
+  if (state.dialogue) drawDialogueChoices();
 }
 
 function updateCamera() {
@@ -766,108 +313,402 @@ function updateCamera() {
   state.camera.y = clamp(state.player.y - canvas.height / 2, 0, WORLD_H - canvas.height);
 }
 
-function updateSystems() {
-  state.worldTime += 1;
-  state.dayTick += 1;
-
-  if (state.dayTick % 2900 === 0) {
-    state.weather = Math.random() > 0.68 ? 'rainy' : 'sunny';
-    setHint(state.weather === 'rainy' ? '구름이 몰려오며 비가 시작됐어요 ☔' : '하늘이 맑게 개었어요 ☀️');
-  }
-
-  const goal = state.level * 140;
-  if (state.xp >= goal) {
-    state.level += 1;
-    state.player.speed += 0.08;
-    state.player.mood = clamp(state.player.mood + 8, 0, 100);
-    setHint(`레벨 업! Lv.${state.level} · 이동 속도 증가`, 220);
-  }
-
-  if (state.hintTimer > 0) state.hintTimer -= 1;
+function updateFish() {
+  state.fishes.forEach((f) => {
+    f.x += f.spd * f.dir;
+    if (f.x < (WATER.x1 + 1) * TILE || f.x > (WATER.x2 - 1) * TILE) f.dir *= -1;
+  });
 }
 
-function render() {
-  drawWorld();
-  state.objects.forEach(drawResource);
-  drawFish();
-  state.npcs.forEach(drawNPC);
-  drawPlayer();
-  drawParticles();
-  drawWeather();
+function updateNPCs() {
+  state.npcs.forEach((n) => {
+    if (n.pause) return;
+    if (!n.target || dist(n, n.target) < 20) {
+      if (n.state === 'fish') n.target = { x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE), y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE) };
+      else n.target = { x: rnd(80, WORLD_W - 80), y: rnd(80, WORLD_H - 80) };
+    }
+    const dx = n.target.x - n.x, dy = n.target.y - n.y;
+    const d = Math.hypot(dx, dy);
+    if (d > 1) {
+      const nx = n.x + (dx / d) * 1.15;
+      const ny = n.y + (dy / d) * 1.15;
+      if (isWalkable(nx, ny) || n.state === 'fish') { n.x = nx; n.y = ny; }
+      n.facing = facingTo(n, n.target);
+    }
+    if (Math.random() < 0.002) n.state = n.state === 'fish' ? 'wander' : 'fish';
+
+    n.talk = dist(state.player, n) < 100 ? 'E로 대화!' : '';
+  });
+}
+
+function collectResources() {
+  state.objects = state.objects.filter((o) => {
+    if (dist(state.player, o) < 22) {
+      state.inv[o.type] += 1;
+      state.xp += 3;
+      setMsg(`${o.type} 획득!`);
+      return false;
+    }
+    return true;
+  });
+  if (state.objects.length < 130) spawnResources();
+}
+
+function nearFishingSpot() {
+  const p = state.player;
+  const nearWater = tileAt(p.x + 28, p.y).b === 'water' || tileAt(p.x - 28, p.y).b === 'water' || tileAt(p.x, p.y + 28).b === 'water';
+  return nearWater || onBridge(p.x, p.y);
+}
+
+function startFishing() {
+  if (!nearFishingSpot()) {
+    setMsg('연못 가장자리 또는 다리 위에서 낚시할 수 있어요.');
+    return;
+  }
+  if (state.fishing.active) return;
+
+  state.fishing.active = true;
+  state.fishing.phase = 'cast';
+  state.fishing.timer = 60 + Math.floor(Math.random() * 60);
+  state.fishing.biteWindow = 0;
+  state.fishing.cursor = 0.1;
+  state.fishing.dir = 1;
+  state.fishing.zoneStart = rnd(0.2, 0.65);
+  state.fishing.zoneWidth = rnd(0.14, 0.22);
+  state.fishing.progress = 0;
+  ui.fishingUi.classList.remove('hidden');
+}
+
+function fishingInput() {
+  if (!state.fishing.active) {
+    startFishing();
+    return;
+  }
+
+  if (state.fishing.phase === 'bite') {
+    state.fishing.phase = 'reel';
+    setMsg('훅! 타이밍 바를 맞춰 게이지를 채우세요!');
+    return;
+  }
+
+  if (state.fishing.phase === 'reel') {
+    const c = state.fishing.cursor;
+    const z1 = state.fishing.zoneStart;
+    const z2 = z1 + state.fishing.zoneWidth;
+    if (c >= z1 && c <= z2) state.fishing.progress += 18;
+    else state.fishing.progress -= 12;
+  }
+}
+
+function updateFishing() {
+  const f = state.fishing;
+  if (!f.active) return;
+
+  if (f.phase === 'cast') {
+    f.timer -= 1;
+    if (f.timer <= 0) {
+      f.phase = 'bite';
+      f.biteWindow = 45;
+      setMsg('입질! 지금 스페이스를 눌러 훅!');
+    }
+  } else if (f.phase === 'bite') {
+    f.biteWindow -= 1;
+    if (f.biteWindow <= 0) {
+      setMsg('타이밍을 놓쳤어요...');
+      f.active = false;
+      ui.fishingUi.classList.add('hidden');
+    }
+  } else if (f.phase === 'reel') {
+    f.cursor += 0.02 * f.dir;
+    if (f.cursor >= 1 || f.cursor <= 0) f.dir *= -1;
+    f.progress -= 0.28;
+    f.progress = clamp(f.progress, 0, 100);
+
+    if (f.progress >= 100) {
+      state.inv.fish += 1;
+      state.xp += 16;
+      setMsg('낚시 성공! 물고기 +1');
+      f.active = false;
+      ui.fishingUi.classList.add('hidden');
+    }
+    if (f.progress <= 0) {
+      setMsg('물고기가 도망쳤어요!');
+      f.active = false;
+      ui.fishingUi.classList.add('hidden');
+    }
+  }
+
+  let html = '';
+  if (f.phase === 'cast') html = '찌를 드리웠습니다... 입질을 기다리는 중';
+  if (f.phase === 'bite') html = '<span style="color:#fde047">!! 입질 !! 스페이스로 훅</span>';
+  if (f.phase === 'reel') {
+    const zL = Math.round(f.zoneStart * 100);
+    const zW = Math.round(f.zoneWidth * 100);
+    const c = Math.round(f.cursor * 100);
+    html = `타이밍 바: [안전구간 ${zL}~${zL + zW}] 커서 ${c}%<br>진행도 ${Math.round(f.progress)}% (구간 안에서 Space)`;
+  }
+  ui.fishingUi.innerHTML = html;
+}
+
+function handleDialogueChoice(idx) {
+  if (!state.dialogue) return;
+  const n = state.dialogue.npc;
+  if (idx === 1) {
+    if (!state.quest.done && state.inv.fish >= state.quest.needs.fish && state.inv.wood >= state.quest.needs.wood) {
+      state.inv.fish -= state.quest.needs.fish;
+      state.inv.wood -= state.quest.needs.wood;
+      state.quest.done = true;
+      state.coins += state.quest.reward;
+      n.talk = '대박! 고마워!';
+      setMsg(`퀘스트 완료! 코인 +${state.quest.reward}`);
+    } else {
+      n.mood = clamp(n.mood + 4, 0, 100);
+      n.talk = '오늘도 평화롭다 😊';
+      state.coins += 5;
+      setMsg(`${n.name}와 담소. 코인 +5`);
+    }
+  }
+  if (idx === 2) {
+    if (state.inv.berry > 0) {
+      state.inv.berry -= 1;
+      n.mood = clamp(n.mood + 10, 0, 100);
+      n.talk = '열매 선물 고마워!';
+      setMsg('선물 성공! 호감도 상승');
+    } else {
+      setMsg('열매가 없어요.');
+    }
+  }
+  closeDialogue();
+}
+
+function closeDialogue() {
+  if (!state.dialogue) return;
+  state.player.pause = false;
+  state.dialogue.npc.pause = false;
+  state.dialogue = null;
+}
+
+function interact() {
+  if (state.house.inside) {
+    state.house.inside = false;
+    setMsg('집 밖으로 나왔습니다.');
+    return;
+  }
+
+  if (state.house.tier > 0 && dist(state.player, { x: state.house.doorX, y: state.house.doorY }) < 42) {
+    state.house.inside = true;
+    setMsg('집 안으로 들어왔습니다. F로 가구 배치');
+    return;
+  }
+
+  const nearest = state.npcs.map((n) => ({ n, d: dist(state.player, n) })).sort((a, b) => a.d - b.d)[0];
+  if (nearest && nearest.d < 80) {
+    const n = nearest.n;
+    state.player.pause = true;
+    n.pause = true;
+    state.player.facing = facingTo(state.player, n);
+    n.facing = facingTo(n, state.player);
+    n.talk = `${n.name}: 무슨 이야기 할까?`;
+    state.dialogue = { npc: n, a: '잡담/퀘스트 전달', b: '열매 선물하기' };
+    return;
+  }
+
+  if (state.house.tier === 0 && dist(state.player, { x: HOUSE_PLOT.x + 90, y: HOUSE_PLOT.y + 70 }) < 80) {
+    setMsg('건축 메뉴에서 집을 지을 수 있어요.');
+  }
+}
+
+function placeFurniture() {
+  if (!state.house.inside) return;
+  if (state.inv.furniture <= 0) {
+    setMsg('배치할 가구가 없어요. 제작에서 가구를 만드세요.');
+    return;
+  }
+  const gx = Math.floor(rnd(0, 4));
+  const gy = Math.floor(rnd(0, 3));
+  state.house.furniture.push({ gx, gy });
+  state.inv.furniture -= 1;
+  setMsg('가구를 배치했습니다!');
+}
+
+function openModal(title, html) {
+  ui.modalTitle.textContent = title;
+  ui.modalBody.innerHTML = html;
+  ui.modal.classList.remove('hidden');
+}
+
+function closeModal() { ui.modal.classList.add('hidden'); }
+
+function openCraft() {
+  const html = `
+  <div class="recipe"><span>🪑 기본 의자 (wood 4, flower 2)</span><button data-craft="chair">제작</button></div>
+  <div class="recipe"><span>🌉 다리 키트 (wood 12, coins 80)</span><button data-craft="bridge">제작/설치</button></div>
+  <div class="recipe"><span>🎣 고급 미끼 (berry 2, shell 1) - 낚시 성공보너스</span><button data-craft="bait">제작</button></div>`;
+  openModal('제작', html);
+  bindModalActions();
+}
+
+function openShop() {
+  const html = `
+  <div class="shop-item"><span>집 건축권 (150 코인)</span><button data-shop="house">구매</button></div>
+  <div class="shop-item"><span>집 업그레이드 (250 코인)</span><button data-shop="upgrade">업그레이드</button></div>
+  <div class="shop-item"><span>꽃씨 패키지 (20 코인)</span><button data-shop="seed">구매</button></div>`;
+  openModal('상점', html);
+  bindModalActions();
+}
+
+function openBuild() {
+  const html = `
+  <div class="shop-item"><span>현재 집 단계: ${state.house.tier}</span><span>${state.house.tier === 0 ? '없음' : state.house.tier === 1 ? '오두막' : '코지하우스'}</span></div>
+  <div class="shop-item"><span>${state.bridgeBuilt ? '다리 설치 완료' : '다리 미설치'}</span><span>${state.bridgeBuilt ? '연못 가로지르기 가능' : '다리 키트 필요'}</span></div>`;
+  openModal('건축 현황', html);
+}
+
+function bindModalActions() {
+  ui.modalBody.querySelectorAll('button').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const c = btn.dataset.craft;
+      const s = btn.dataset.shop;
+      if (c === 'chair') {
+        if (state.inv.wood >= 4 && state.inv.flower >= 2) {
+          state.inv.wood -= 4; state.inv.flower -= 2; state.inv.furniture += 1;
+          setMsg('가구 제작 완료! 집 안에서 F로 배치하세요.');
+        } else setMsg('재료가 부족합니다.');
+      }
+      if (c === 'bridge') {
+        if (state.bridgeBuilt) { setMsg('이미 다리가 있습니다.'); return; }
+        if (state.inv.wood >= 12 && state.coins >= 80) {
+          state.inv.wood -= 12; state.coins -= 80; state.bridgeBuilt = true;
+          setMsg('연못 다리 완성! 이제 다리 위에서 낚시할 수 있어요.');
+        } else setMsg('목재 또는 코인이 부족합니다.');
+      }
+      if (c === 'bait') {
+        if (state.inv.berry >= 2 && state.inv.shell >= 1) {
+          state.inv.berry -= 2; state.inv.shell -= 1;
+          state.fishing.zoneWidth = clamp(state.fishing.zoneWidth + 0.04, 0.14, 0.35);
+          setMsg('미끼 제작! 이번 낚시 타이밍 구간이 넓어집니다.');
+        } else setMsg('재료가 부족합니다.');
+      }
+
+      if (s === 'house') {
+        if (state.house.tier > 0) return setMsg('이미 집을 보유 중입니다.');
+        if (state.coins >= 150) { state.coins -= 150; state.house.tier = 1; setMsg('오두막 건축 완료! 문 앞에서 E로 입장.'); }
+        else setMsg('코인이 부족합니다.');
+      }
+      if (s === 'upgrade') {
+        if (state.house.tier === 0) return setMsg('먼저 집을 구매하세요.');
+        if (state.house.tier >= 2) return setMsg('최대 업그레이드입니다.');
+        if (state.coins >= 250) { state.coins -= 250; state.house.tier = 2; setMsg('집 업그레이드 완료! 내부가 더 아늑해졌어요.'); }
+        else setMsg('코인이 부족합니다.');
+      }
+      if (s === 'seed') {
+        if (state.coins >= 20) { state.coins -= 20; state.inv.flower += 2; setMsg('꽃씨 구매 완료 (꽃 +2).'); }
+        else setMsg('코인이 부족합니다.');
+      }
+
+      updateUI();
+    });
+  });
+}
+
+function playerMove() {
+  if (state.player.pause || state.house.inside) return;
+  let dx = 0, dy = 0;
+  const run = state.keys.has('Shift');
+  const spd = (run ? 1.45 : 1) * (state.player.energy > 0 ? state.player.speed : 1.2);
+
+  if (state.keys.has('ArrowUp') || state.keys.has('w')) { dy -= spd; state.player.facing = 'up'; }
+  if (state.keys.has('ArrowDown') || state.keys.has('s')) { dy += spd; state.player.facing = 'down'; }
+  if (state.keys.has('ArrowLeft') || state.keys.has('a')) { dx -= spd; state.player.facing = 'left'; }
+  if (state.keys.has('ArrowRight') || state.keys.has('d')) { dx += spd; state.player.facing = 'right'; }
+
+  const nx = clamp(state.player.x + dx, 16, WORLD_W - 16);
+  const ny = clamp(state.player.y + dy, 16, WORLD_H - 16);
+  if (isWalkable(nx, ny)) { state.player.x = nx; state.player.y = ny; }
+
+  const moving = dx || dy;
+  if (moving) {
+    state.player.energy = clamp(state.player.energy - (run ? 0.08 : 0.04), 0, 100);
+    state.player.mood = clamp(state.player.mood + 0.01, 0, 100);
+  } else {
+    state.player.energy = clamp(state.player.energy + 0.03, 0, 100);
+    state.player.mood = clamp(state.player.mood - 0.003, 0, 100);
+  }
 }
 
 function updateUI() {
-  ui.time.textContent = `🕒 ${timePhase()}`;
-  ui.weather.textContent = state.weather === 'sunny' ? '☀️ 맑음' : '🌧️ 비';
-  ui.energy.textContent = `⚡ ${Math.floor(state.player.energy)}`;
-  ui.mood.textContent = `💖 ${Math.floor(state.player.mood)}`;
-  ui.coins.textContent = `🪙 ${state.coins}`;
-  ui.level.textContent = `⭐ ${state.level}`;
-  ui.hint.textContent = state.hintTimer > 0 ? state.hint : '';
+  const t = (Math.sin(state.time * 0.0023) + 1) / 2;
+  const phase = t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
+  ui.stats.innerHTML = `🕒 ${phase} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level}`;
+  ui.inventory.innerHTML = ITEMS.map(([k, e]) => `<div>${e} ${k}: <b>${state.inv[k]}</b></div>`).join('');
+  ui.quest.innerHTML = state.quest.done
+    ? `✅ ${state.quest.title}<br>완료! 이제 집과 인테리어를 꾸며보세요.`
+    : `물고기 ${state.inv.fish}/${state.quest.needs.fish}, 목재 ${state.inv.wood}/${state.quest.needs.wood}<br>보상: ${state.quest.reward} 코인`;
 
-  ui.inventory.innerHTML = ITEMS.map((i) => `<div>${i.icon} ${i.label}: <b>${state.inventory[i.key]}</b></div>`).join('');
-
-  const q = state.quest;
-  ui.quest.innerHTML = q.complete
-    ? `✅ <b>${q.title}</b><br>잔치 준비 완료! NPC와 대화해 소소한 보상을 받으세요.`
-    : `📌 <b>${q.title}</b><br>꽃 ${state.inventory.flower}/${q.needs.flower}, 물고기 ${state.inventory.fish}/${q.needs.fish}, 목재 ${state.inventory.wood}/${q.needs.wood}<br>보상: 🪙 ${q.reward}`;
-
-  ui.npcFeed.innerHTML = state.npcs
-    .map((n) => `• <b>${n.name}</b> : ${AI_LABELS[n.ai.state]} (기분 ${Math.floor(n.mood)} / 에너지 ${Math.floor(n.energy)})`)
-    .join('<br>') + '<hr style="border:none;border-top:1px solid #dbeafe;margin:8px 0">' + state.aiFeed.join('<br>');
+  ui.message.textContent = state.msgTimer > 0 ? state.msg : '';
 }
 
-function loop() {
-  playerMove();
-  updateFish();
-  collectNearby();
-  updateNPCs();
-  updateSystems();
-  updateCamera();
+function tick() {
+  state.time += 1;
+  if (state.msgTimer > 0) state.msgTimer -= 1;
+
+  if (!state.house.inside) {
+    playerMove();
+    updateFish();
+    updateNPCs();
+    collectResources();
+    updateCamera();
+
+    drawWorld();
+    state.objects.forEach(drawResource);
+    drawFish();
+    drawAllCharacters();
+  } else {
+    drawHouseInterior();
+  }
+
+  updateFishing();
+
+  if (state.time % 3000 === 0) {
+    state.weather = Math.random() > 0.7 ? 'rainy' : 'sunny';
+    setMsg(state.weather === 'rainy' ? '비가 내리기 시작했어요.' : '하늘이 맑게 갰어요.');
+  }
+
   updateUI();
-  render();
-  requestAnimationFrame(loop);
+  requestAnimationFrame(tick);
 }
 
 window.addEventListener('keydown', (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
-  if (state.dialogue.open) {
-    if (key === '1') applyDialogueChoice(0);
-    if (key === '2') applyDialogueChoice(1);
-    if (key === 'escape') closeDialogue();
-    if (key === '1' || key === '2' || key === 'escape') {
-      e.preventDefault();
-      return;
-    }
+  if (state.dialogue) {
+    if (key === '1') return handleDialogueChoice(1);
+    if (key === '2') return handleDialogueChoice(2);
+    if (key === 'escape') return closeDialogue();
   }
 
   if (key === ' ') {
-    fishAction();
     e.preventDefault();
+    fishingInput();
     return;
   }
-  if (key === 'e') {
-    interact();
-    return;
-  }
+  if (key === 'e') { interact(); return; }
+  if (key === 'f') { placeFurniture(); return; }
   state.keys.add(key);
 });
-
 window.addEventListener('keyup', (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
   state.keys.delete(key);
 });
 
-ui.restBtn.addEventListener('click', rest);
-ui.dialogueChoiceA.addEventListener('click', () => applyDialogueChoice(0));
-ui.dialogueChoiceB.addEventListener('click', () => applyDialogueChoice(1));
-ui.dialogueClose.addEventListener('click', closeDialogue);
+ui.btnCraft.addEventListener('click', openCraft);
+ui.btnShop.addEventListener('click', openShop);
+ui.btnBuild.addEventListener('click', openBuild);
+ui.modalClose.addEventListener('click', closeModal);
+ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModal(); });
 
-spawnWorldObjects();
+spawnResources();
 spawnFish();
-createNPCs();
-state.npcs.forEach((npc) => chooseBehavior(npc));
-updateCamera();
+initNPCs();
 updateUI();
-loop();
+tick();
