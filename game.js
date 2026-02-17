@@ -2,6 +2,7 @@ const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
 const ui = {
+  game3d: document.getElementById('game3d'),
   stats: document.getElementById('statsBar'),
   inventory: document.getElementById('inventory'),
   quest: document.getElementById('quest'),
@@ -96,13 +97,21 @@ const state = {
   achievements: { bridgeMaster: false, museum10: false, relation90: false },
   decorScore: 0,
   renderMode: '2d',
-  version: 'v0.6',
+  camera3d: { yaw: 0.75, dist: 560, height: 300 },
+  version: 'v0.7',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function rnd(min, max) { return Math.random() * (max - min) + min; }
 function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
 function worldToScreen(x, y) { return { x: x - state.camera.x, y: y - state.camera.y }; }
+
+const render3d = {
+  ready: false,
+  loading: false,
+  canvas: null,
+  ctx: null,
+};
 
 function setMsg(text, t = 170) { state.msg = text; state.msgTimer = t; }
 function addLog(text) { state.logs.unshift(`[D${state.day}] ${text}`); state.logs = state.logs.slice(0, 7); }
@@ -309,11 +318,7 @@ function drawWorld() {
       if (gx < 0 || gy < 0 || gx >= MAP_W || gy >= MAP_H) continue;
       const b = biomes[gy][gx];
       const p = worldToScreen(gx * TILE, gy * TILE);
-      if (state.renderMode === '3d') {
-        drawTile3D(p.x, p.y, b);
-      } else {
-        drawTile2D(p.x, p.y, b);
-      }
+      drawTile2D(p.x, p.y, b);
     }
   }
 
@@ -1075,6 +1080,179 @@ function updateCalendar() {
   }
 }
 
+
+async function ensure3DWorld() {
+  if (render3d.ready || render3d.loading) return;
+  render3d.loading = true;
+  try {
+    render3d.canvas = document.createElement('canvas');
+    render3d.canvas.width = 1280;
+    render3d.canvas.height = 720;
+    render3d.ctx = render3d.canvas.getContext('2d');
+    ui.game3d.innerHTML = '';
+    ui.game3d.appendChild(render3d.canvas);
+    render3d.ready = true;
+    resize3DRenderer();
+  } catch (err) {
+    console.error(err);
+    state.renderMode = '2d';
+    setMsg('3D 렌더 초기화 실패로 2D로 전환됩니다.');
+  } finally {
+    render3d.loading = false;
+  }
+}
+
+function resize3DRenderer() {
+  if (!render3d.ready || !ui.game3d) return;
+  const w = Math.max(320, Math.floor(ui.game3d.clientWidth || 1280));
+  const h = Math.max(180, Math.floor(ui.game3d.clientHeight || 720));
+  render3d.canvas.width = w;
+  render3d.canvas.height = h;
+}
+
+function projectIso(x, y, z, cam) {
+  const tx = x - cam.x;
+  const tz = z - cam.z;
+  const cos = Math.cos(cam.yaw);
+  const sin = Math.sin(cam.yaw);
+  const rx = tx * cos - tz * sin;
+  const rz = tx * sin + tz * cos;
+  return {
+    x: cam.w * 0.5 + rx * cam.scale,
+    y: cam.h * 0.58 + rz * cam.scale * 0.5 - y,
+    depth: rz,
+  };
+}
+
+function drawIsoTile(ctx3d, cx, cy, h, color) {
+  const hw = 21;
+  const hh = 11;
+  ctx3d.beginPath();
+  ctx3d.moveTo(cx, cy - h - hh);
+  ctx3d.lineTo(cx + hw, cy - h);
+  ctx3d.lineTo(cx, cy - h + hh);
+  ctx3d.lineTo(cx - hw, cy - h);
+  ctx3d.closePath();
+  ctx3d.fillStyle = color;
+  ctx3d.fill();
+
+  ctx3d.beginPath();
+  ctx3d.moveTo(cx - hw, cy - h);
+  ctx3d.lineTo(cx, cy - h + hh);
+  ctx3d.lineTo(cx, cy + hh);
+  ctx3d.lineTo(cx - hw, cy);
+  ctx3d.closePath();
+  ctx3d.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx3d.fill();
+
+  ctx3d.beginPath();
+  ctx3d.moveTo(cx + hw, cy - h);
+  ctx3d.lineTo(cx, cy - h + hh);
+  ctx3d.lineTo(cx, cy + hh);
+  ctx3d.lineTo(cx + hw, cy);
+  ctx3d.closePath();
+  ctx3d.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx3d.fill();
+}
+
+function renderWorld3D() {
+  if (!render3d.ready) return;
+  const ctx3d = render3d.ctx;
+  const w = render3d.canvas.width;
+  const h = render3d.canvas.height;
+  const day = (Math.sin(state.time * 0.0023) + 1) / 2;
+  ctx3d.fillStyle = `rgb(${70 + day * 60}, ${130 + day * 70}, ${95 + day * 55})`;
+  ctx3d.fillRect(0, 0, w, h);
+
+  const cam = {
+    x: state.player.x,
+    z: state.player.y,
+    yaw: state.camera3d.yaw,
+    scale: clamp(1.2 - ((state.camera3d.dist - 320) / 1000), 0.55, 1.2),
+    w,
+    h,
+  };
+
+  const drawables = [];
+
+  for (let gy = 0; gy < MAP_H; gy++) {
+    for (let gx = 0; gx < MAP_W; gx++) {
+      const b = biomes[gy][gx];
+      const p = projectIso(gx * TILE, 0, gy * TILE, cam);
+      drawables.push({ type: 'tile', p, b });
+    }
+  }
+
+  state.objects.slice(0, 160).forEach((o) => {
+    const p = projectIso(o.x, 16 + Math.sin(state.time * 0.04 + o.bob) * 4, o.y, cam);
+    drawables.push({ type: 'res', p, o });
+  });
+
+  state.npcs.forEach((n) => {
+    const p = projectIso(n.x, 28, n.y, cam);
+    drawables.push({ type: 'npc', p, n });
+  });
+
+  drawables.push({ type: 'player', p: projectIso(state.player.x, 28, state.player.y, cam) });
+
+  if (state.house.tier > 0) {
+    drawables.push({ type: 'house', p: projectIso(HOUSE_PLOT.x + 90, 0, HOUSE_PLOT.y + 65, cam) });
+  }
+
+  if (state.bridgeBuilt) {
+    const p = projectIso((BRIDGE.x1 + BRIDGE.x2) * TILE * 0.5, 0, BRIDGE.y * TILE, cam);
+    drawables.push({ type: 'bridge', p });
+  }
+
+  drawables.sort((a, b) => a.p.depth - b.p.depth);
+
+  drawables.forEach((d) => {
+    if (d.type === 'tile') {
+      const col = d.b === 'water' ? '#4e88d1' : d.b === 'grove' ? '#498f4f' : d.b === 'meadow' ? '#79c969' : '#62af60';
+      drawIsoTile(ctx3d, d.p.x, d.p.y, d.b === 'water' ? 4 : 12, col);
+      return;
+    }
+    if (d.type === 'bridge') {
+      ctx3d.fillStyle = '#8b5a2b';
+      ctx3d.fillRect(d.p.x - 130 * cam.scale, d.p.y - 20, 260 * cam.scale, 12);
+      return;
+    }
+    if (d.type === 'house') {
+      ctx3d.fillStyle = '#92400e';
+      ctx3d.fillRect(d.p.x - 46, d.p.y - 70, 92, 64);
+      ctx3d.fillStyle = '#78350f';
+      ctx3d.beginPath();
+      ctx3d.moveTo(d.p.x - 56, d.p.y - 70);
+      ctx3d.lineTo(d.p.x, d.p.y - 115);
+      ctx3d.lineTo(d.p.x + 56, d.p.y - 70);
+      ctx3d.closePath();
+      ctx3d.fill();
+      return;
+    }
+    if (d.type === 'res') {
+      const col = d.o.type === 'wood' ? '#5b3b1f' : d.o.type === 'flower' ? '#f472b6' : d.o.type === 'berry' ? '#4f46e5' : d.o.type === 'shell' ? '#e5e7eb' : '#fde68a';
+      ctx3d.fillStyle = col;
+      ctx3d.beginPath();
+      ctx3d.arc(d.p.x, d.p.y - 8, 4, 0, Math.PI * 2);
+      ctx3d.fill();
+      return;
+    }
+    const col = d.type === 'player' ? '#2563eb' : d.n.color;
+    ctx3d.fillStyle = col;
+    ctx3d.fillRect(d.p.x - 6, d.p.y - 26, 12, 21);
+    ctx3d.fillStyle = '#ffedd5';
+    ctx3d.beginPath();
+    ctx3d.arc(d.p.x, d.p.y - 30, 6, 0, Math.PI * 2);
+    ctx3d.fill();
+  });
+}
+
+function syncRenderSurface() {
+  const enable3D = state.renderMode === '3d' && !state.house.inside;
+  canvas.classList.toggle('hidden', enable3D);
+  ui.game3d.classList.toggle('hidden', !enable3D);
+}
+
 function updateUI() {
   const t = (Math.sin(state.time * 0.0023) + 1) / 2;
   const phase = t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
@@ -1110,13 +1288,18 @@ function tick() {
     updateCrops();
     updateCamera();
 
-    drawWorld();
-    state.objects.forEach(drawResource);
-    drawFish();
-    drawAllCharacters();
+    if (state.renderMode === '3d' && render3d.ready) {
+      renderWorld3D();
+    } else {
+      drawWorld();
+      state.objects.forEach(drawResource);
+      drawFish();
+      drawAllCharacters();
+    }
   } else {
     drawHouseInterior();
   }
+  syncRenderSurface();
 
   updateFishing();
   updateEconomyAndLevel();
@@ -1129,10 +1312,13 @@ function tick() {
 }
 
 
-function toggleRenderMode() {
-  state.renderMode = state.renderMode === '2d' ? '3d' : '2d';
+async function toggleRenderMode() {
+  const next = state.renderMode === '2d' ? '3d' : '2d';
+  if (next === '3d' && !render3d.ready) await ensure3DWorld();
+  state.renderMode = next === '3d' && render3d.ready ? '3d' : '2d';
   ui.btnRender.textContent = state.renderMode === '3d' ? '🧱 2D뷰' : '🧊 3D뷰';
-  setMsg(state.renderMode === '3d' ? '3D 렌더 모드 활성화' : '2D 렌더 모드 활성화');
+  syncRenderSurface();
+  setMsg(state.renderMode === '3d' ? '풀 3D 월드 모드 활성화' : '2D 렌더 모드 활성화');
 }
 
 window.addEventListener('keydown', (e) => {
@@ -1151,6 +1337,13 @@ window.addEventListener('keydown', (e) => {
     if (key === 'l') return moveFurniture(1, 0);
     if (key === 't') return rotateFurniture();
     if (key === 'tab') { e.preventDefault(); return cycleFurnitureSelection(); }
+  }
+
+  if (state.renderMode === '3d') {
+    if (key === 'q') { state.camera3d.yaw -= 0.08; return; }
+    if (key === 'c') { state.camera3d.yaw += 0.08; return; }
+    if (key === 'z') { state.camera3d.dist = clamp(state.camera3d.dist - 28, 300, 900); return; }
+    if (key === 'x') { state.camera3d.dist = clamp(state.camera3d.dist + 28, 300, 900); return; }
   }
 
   if (key === ' ') { e.preventDefault(); fishingInput(); return; }
@@ -1182,5 +1375,7 @@ spawnResources();
 spawnFish();
 initNPCs();
 ui.btnRender.textContent = '🧊 3D뷰';
+syncRenderSurface();
+window.addEventListener('resize', resize3DRenderer);
 updateUI();
 tick();
