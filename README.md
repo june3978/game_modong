@@ -100,3 +100,19 @@ python3 -m http.server 8000
 - 주민별로 조합형 대사 풀을 도입해 **NPC당 200개+**, 전체 **100개 이상 대화 바리에이션**이 순환되도록 확장했습니다.
 - 대화 2번 선택지에 `요청 제출 → 물물교환 → 선물` 우선순위를 넣어 수집 재료 활용 루프를 강화했습니다.
 - 일일 물물교환 오퍼를 추가하고, 마을 보드에서 오늘의 교환 정보를 확인할 수 있습니다.
+
+
+## v2.5 스프라이트 렌더(2D) 가이드
+
+- 2D 렌더는 이제 `assets/tiles.png`, `assets/characters.png`, `assets/items.png` 스프라이트 아틀라스를 우선 사용합니다.
+- PNG가 없거나 로드 실패하면 기존 `fillRect`/이모지 렌더링으로 자동 폴백됩니다.
+- 외부 번들러 없이 순수 브라우저 로딩(`new Image()`)만 사용합니다.
+- 픽셀아트 선명도를 위해 `ctx.imageSmoothingEnabled = false`를 적용했습니다.
+- 권장 기본 셀 크기: **16x16 px** (`SPRITE_CELL = 16`).
+- 타일 시트(`tiles.png`) 배치: 1행 기준 `water, grass, grove, meadow` 순서(좌→우).
+- 캐릭터 시트(`characters.png`) 배치:
+  - 행(row): `down(0), left(1), right(2), up(3)`
+  - 열(col): 캐릭터당 4프레임 걷기 (`0~3 player`, `4~7 luna`, `8~11 bomi`, `12~15 maru`, ...)
+- 아이템 시트(`items.png`) 배치: 1행 기준 `wood, flower, berry, shell, fish, bug, seed, furniture`.
+- 게임 내 표시 스케일은 캐릭터 기준 약 3배(`SPRITE_SCALE = 3`)이며 타일은 기존 TILE 크기에 맞춰 확대됩니다.
+- 스프라이트 미제공 상태에서도 게임플레이(낚시/농사/상점/퀘스트/저장/3D모드)는 유지됩니다.

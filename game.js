@@ -1,5 +1,41 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
+ctx.imageSmoothingEnabled = false;
+
+const SPRITE_CELL = 16;
+const SPRITE_SCALE = 3;
+
+const spriteAtlas = {
+  tiles: { img: null, loaded: false, failed: false, src: 'assets/tiles.png' },
+  characters: { img: null, loaded: false, failed: false, src: 'assets/characters.png' },
+  items: { img: null, loaded: false, failed: false, src: 'assets/items.png' },
+};
+
+function loadAtlasImage(key) {
+  const atlas = spriteAtlas[key];
+  if (!atlas || atlas.loaded || atlas.failed || atlas.img) return;
+  const img = new Image();
+  atlas.img = img;
+  img.onload = () => { atlas.loaded = true; atlas.failed = false; };
+  img.onerror = () => { atlas.failed = true; atlas.loaded = false; atlas.img = null; };
+  img.src = atlas.src;
+}
+
+function initSpriteAtlases() {
+  loadAtlasImage('tiles');
+  loadAtlasImage('characters');
+  loadAtlasImage('items');
+}
+
+function drawSprite(ctx2d, img, sx, sy, sw, sh, dx, dy, dw, dh) {
+  if (!img) return false;
+  try {
+    ctx2d.drawImage(img, sx, sy, sw, sh, dx, dy, dw, dh);
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 const ui = {
   game3d: document.getElementById('game3d'),
@@ -612,8 +648,30 @@ function getTileColor(biome) {
 }
 
 function drawTile2D(x, y, biome) {
-  ctx.fillStyle = getTileColor(biome);
-  ctx.fillRect(x, y, TILE + 1, TILE + 1);
+  const atlas = spriteAtlas.tiles;
+  const tileMap = {
+    water: { tx: 0, ty: 0 },
+    grass: { tx: 1, ty: 0 },
+    grove: { tx: 2, ty: 0 },
+    meadow: { tx: 3, ty: 0 },
+  };
+  const t = tileMap[biome] || tileMap.grass;
+  const ok = atlas.loaded && drawSprite(
+    ctx,
+    atlas.img,
+    t.tx * SPRITE_CELL,
+    t.ty * SPRITE_CELL,
+    SPRITE_CELL,
+    SPRITE_CELL,
+    x,
+    y,
+    TILE + 1,
+    TILE + 1,
+  );
+  if (!ok) {
+    ctx.fillStyle = getTileColor(biome);
+    ctx.fillRect(x, y, TILE + 1, TILE + 1);
+  }
 }
 
 function drawTile3D(x, y, biome) {
@@ -729,14 +787,42 @@ function drawHouseInterior() {
     }
   });
 
-  drawCharacterScreen(state.house.interiorPlayer.x, state.house.interiorPlayer.y, '#3b82f6', state.player.facing);
+  drawCharacterScreen(state.house.interiorPlayer.x, state.house.interiorPlayer.y, '#3b82f6', state.player.facing, 'player', state.keys.size ? 0.1 : 0);
 }
 
 function drawResource(o) {
   const p = worldToScreen(o.x, o.y + Math.sin(state.time * 0.05 + o.bob) * 2);
   if (p.x < -20 || p.y < -20 || p.x > canvas.width + 20 || p.y > canvas.height + 20) return;
-  const emoji = ITEMS.find(([k]) => k === o.type)?.[1] || '•';
-  ctx.fillText(emoji, p.x - 8, p.y + 6);
+
+  const atlas = spriteAtlas.items;
+  const itemMap = {
+    wood: { tx: 0, ty: 0 },
+    flower: { tx: 1, ty: 0 },
+    berry: { tx: 2, ty: 0 },
+    shell: { tx: 3, ty: 0 },
+    fish: { tx: 4, ty: 0 },
+    bug: { tx: 5, ty: 0 },
+    seed: { tx: 6, ty: 0 },
+    furniture: { tx: 7, ty: 0 },
+  };
+  const t = itemMap[o.type];
+  const iconSize = 22;
+  const ok = t && atlas.loaded && drawSprite(
+    ctx,
+    atlas.img,
+    t.tx * SPRITE_CELL,
+    t.ty * SPRITE_CELL,
+    SPRITE_CELL,
+    SPRITE_CELL,
+    p.x - iconSize / 2,
+    p.y - iconSize / 2,
+    iconSize,
+    iconSize,
+  );
+  if (!ok) {
+    const emoji = ITEMS.find(([k]) => k === o.type)?.[1] || '•';
+    ctx.fillText(emoji, p.x - 8, p.y + 6);
+  }
 }
 
 function drawFish() {
@@ -756,28 +842,55 @@ function drawFish() {
   });
 }
 
-function drawCharacter(x, y, color, facing = 'down') {
+function drawCharacter(x, y, color, facing = 'down', charKey = 'player', velocity = 0) {
   const p = worldToScreen(x, y);
-  drawCharacterScreen(p.x, p.y, color, facing);
+  drawCharacterScreen(p.x, p.y, color, facing, charKey, velocity);
 }
 
-function drawCharacterScreen(x, y, color, facing = 'down') {
+function drawCharacterScreen(x, y, color, facing = 'down', charKey = 'player', velocity = 0) {
   ctx.fillStyle = 'rgba(0,0,0,0.2)';
   ctx.beginPath();
   ctx.ellipse(x, y + 16, 12, 5, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = color;
-  ctx.fillRect(x - 9, y - 6, 18, 23);
-  ctx.fillStyle = '#ffedd5';
-  ctx.beginPath();
-  ctx.arc(x, y - 12, 8, 0, Math.PI * 2);
-  ctx.fill();
+  const atlas = spriteAtlas.characters;
+  const facingRow = { down: 0, left: 1, right: 2, up: 3 };
+  const charColBase = { player: 0, luna: 4, bomi: 8, maru: 12, nari: 16, toto: 20, pipi: 24 };
+  const row = facingRow[facing] ?? 0;
+  const moving = velocity > 0.04;
+  const walk = moving ? Math.floor((state.time / 12) % 4) : 0;
+  const col = (charColBase[charKey] ?? 0) + walk;
+  const sw = SPRITE_CELL;
+  const sh = SPRITE_CELL;
+  const dw = sw * SPRITE_SCALE;
+  const dh = sh * SPRITE_SCALE;
 
-  ctx.fillStyle = '#111827';
-  if (facing === 'left') ctx.fillRect(x - 8, y - 13, 2, 2);
-  if (facing === 'right') ctx.fillRect(x + 6, y - 13, 2, 2);
-  if (facing === 'down') { ctx.fillRect(x - 5, y - 13, 2, 2); ctx.fillRect(x + 3, y - 13, 2, 2); }
+  const ok = atlas.loaded && drawSprite(
+    ctx,
+    atlas.img,
+    col * sw,
+    row * sh,
+    sw,
+    sh,
+    x - dw / 2,
+    y - dh * 0.78,
+    dw,
+    dh,
+  );
+
+  if (!ok) {
+    ctx.fillStyle = color;
+    ctx.fillRect(x - 9, y - 6, 18, 23);
+    ctx.fillStyle = '#ffedd5';
+    ctx.beginPath();
+    ctx.arc(x, y - 12, 8, 0, Math.PI * 2);
+    ctx.fill();
+
+    ctx.fillStyle = '#111827';
+    if (facing === 'left') ctx.fillRect(x - 8, y - 13, 2, 2);
+    if (facing === 'right') ctx.fillRect(x + 6, y - 13, 2, 2);
+    if (facing === 'down') { ctx.fillRect(x - 5, y - 13, 2, 2); ctx.fillRect(x + 3, y - 13, 2, 2); }
+  }
 }
 
 function drawSpeechBubble(actor, text) {
@@ -808,10 +921,10 @@ function drawDialogueChoices() {
 
 function drawAllCharacters() {
   state.npcs.forEach((n) => {
-    drawCharacter(n.x, n.y, n.color, n.facing || 'down');
+    drawCharacter(n.x, n.y, n.color, n.facing || 'down', n.id, Math.hypot(n.vx || 0, n.vy || 0));
     drawSpeechBubble(n, n.talk);
   });
-  drawCharacter(state.player.x, state.player.y, '#2563eb', state.player.facing);
+  drawCharacter(state.player.x, state.player.y, '#2563eb', state.player.facing, 'player', state.keys.size ? 0.1 : 0);
   if (state.dialogue) drawDialogueChoices();
 }
 
@@ -2702,6 +2815,7 @@ ui.dialogueUi.addEventListener('click', (e) => {
   else closeDialogue();
 });
 
+initSpriteAtlases();
 loadGame();
 calcDailyShopStock();
 rollResidentRequests();
