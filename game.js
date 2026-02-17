@@ -58,7 +58,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v1.6: PolyHaven 우선 텍스처 체인 + PBR 고도화',
+  msg: 'v1.7: 렌더러/건물 품질 패스 강화',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -101,7 +101,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v1.6',
+  version: 'v1.7',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -1392,6 +1392,59 @@ function createRigCharacter(primary = '#3b82f6', secondary = '#0f172a', scale = 
   return g;
 }
 
+function addBuildingGroundShadow(group, w = 3, h = 2.2) {
+  const shadow = new THREE.Mesh(
+    new THREE.PlaneGeometry(w, h),
+    new THREE.MeshBasicMaterial({ color: '#000000', transparent: true, opacity: 0.18 }),
+  );
+  shadow.rotation.x = -Math.PI / 2;
+  shadow.position.y = 0.04;
+  group.add(shadow);
+}
+
+function createStyledBuilding({ mats, width = 3.6, depth = 2.8, wallH = 2.4, roofW = 2.5, roofH = 1.6, trim = '#4b5563' }) {
+  const g = new THREE.Group();
+
+  const foundation = new THREE.Mesh(new THREE.BoxGeometry(width + 0.24, 0.34, depth + 0.24), new THREE.MeshStandardMaterial({ color: '#616a74', roughness: 0.9, metalness: 0.03 }));
+  foundation.position.y = 0.18;
+  foundation.receiveShadow = true;
+  foundation.castShadow = true;
+
+  const body = new THREE.Mesh(new THREE.BoxGeometry(width, wallH, depth), mats.wall);
+  body.position.y = wallH * 0.5 + 0.34;
+  body.castShadow = true;
+  body.receiveShadow = true;
+
+  const roof = new THREE.Mesh(new THREE.ConeGeometry(roofW, roofH, 4), mats.roof);
+  roof.position.y = wallH + roofH * 0.5 + 0.36;
+  roof.rotation.y = Math.PI * 0.25;
+  roof.castShadow = true;
+
+  const trimMat = new THREE.MeshStandardMaterial({ color: trim, roughness: 0.72, metalness: 0.08 });
+  const door = new THREE.Mesh(new THREE.BoxGeometry(0.62, 1.1, 0.08), trimMat);
+  door.position.set(0, 0.9, depth * 0.5 + 0.05);
+  const knob = new THREE.Mesh(new THREE.SphereGeometry(0.04, 10, 10), new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.35, metalness: 0.8 }));
+  knob.position.set(0.18, 0.9, depth * 0.5 + 0.1);
+
+  const windowMat = new THREE.MeshPhysicalMaterial({ color: '#93c5fd', roughness: 0.06, metalness: 0.15, transmission: 0.68, transparent: true, opacity: 0.88 });
+  const frameMat = new THREE.MeshStandardMaterial({ color: '#d1d5db', roughness: 0.5, metalness: 0.2 });
+  [-1, 1].forEach((dir) => {
+    const frame = new THREE.Mesh(new THREE.BoxGeometry(0.86, 0.7, 0.09), frameMat);
+    frame.position.set(dir * 0.88, 1.5, depth * 0.5 + 0.06);
+    const pane = new THREE.Mesh(new THREE.BoxGeometry(0.72, 0.55, 0.04), windowMat);
+    pane.position.set(dir * 0.88, 1.5, depth * 0.5 + 0.1);
+    g.add(frame, pane);
+  });
+
+  const chimney = new THREE.Mesh(new THREE.BoxGeometry(0.36, 0.9, 0.36), trimMat);
+  chimney.position.set(-0.9, wallH + 0.7, -0.5);
+  chimney.castShadow = true;
+
+  g.add(foundation, body, roof, door, knob, chimney);
+  addBuildingGroundShadow(g, width + 1.2, depth + 0.9);
+  return g;
+}
+
 function animateRigCharacter(model, t, moving = true) {
   if (!model?.userData?.parts) return;
   const { armL, armR, legL, legR, torso } = model.userData.parts;
@@ -1475,43 +1528,24 @@ function buildThreeWorld() {
     render3d.world.add(tree);
   }
 
-  const house = new THREE.Group();
-  const houseBase = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.1, 2.6), mats.wall);
-  houseBase.position.y = 1.3;
-  houseBase.castShadow = true;
-  const houseRoof = new THREE.Mesh(new THREE.ConeGeometry(2.4, 1.6, 4), mats.roof);
-  houseRoof.position.y = 3.05;
-  houseRoof.rotation.y = Math.PI * 0.25;
-  houseRoof.castShadow = true;
-  house.add(houseBase, houseRoof);
+  const house = createStyledBuilding({ mats, width: 3.3, depth: 2.7, wallH: 2.3, roofW: 2.45, roofH: 1.7, trim: '#7c2d12' });
   house.position.set(HOUSE_PLOT.x / TILE - MAP_W / 2 + 1.8, 0, HOUSE_PLOT.y / TILE - MAP_H / 2 + 1.2);
   house.visible = state.house.tier > 0;
   render3d.house = house;
   render3d.world.add(house);
 
-  const shop = new THREE.Group();
-  const shopBase = new THREE.Mesh(new THREE.BoxGeometry(3.6, 2.3, 2.8), mats.wall);
-  shopBase.position.y = 1.45;
-  shopBase.castShadow = true;
-  const shopRoof = new THREE.Mesh(new THREE.ConeGeometry(2.35, 1.35, 4), mats.roof);
-  shopRoof.position.y = 3.15;
-  shopRoof.rotation.y = Math.PI * 0.25;
-  shopRoof.castShadow = true;
+  const shop = createStyledBuilding({ mats, width: 3.8, depth: 3.0, wallH: 2.5, roofW: 2.6, roofH: 1.5, trim: '#78350f' });
   const sign = new THREE.Mesh(new THREE.BoxGeometry(1.2, 0.5, 0.1), new THREE.MeshStandardMaterial({ color: '#facc15', roughness: 0.6 }));
   sign.position.set(0, 2.2, 1.42);
-  shop.add(shopBase, shopRoof, sign);
+  const awning = new THREE.Mesh(new THREE.BoxGeometry(2.2, 0.2, 0.8), new THREE.MeshStandardMaterial({ color: '#ef4444', roughness: 0.6 }));
+  awning.position.set(0, 1.9, 1.9);
+  awning.castShadow = true;
+  shop.add(sign, awning);
   shop.position.set(SHOP_PLOT.x / TILE - MAP_W / 2 + 1.8, 0, SHOP_PLOT.y / TILE - MAP_H / 2 + 1.2);
   render3d.shop = shop;
   render3d.world.add(shop);
 
-  const museum = new THREE.Group();
-  const museumBase = new THREE.Mesh(new THREE.BoxGeometry(4.2, 2.6, 3.1), mats.wall);
-  museumBase.position.y = 1.6;
-  museumBase.castShadow = true;
-  const museumRoof = new THREE.Mesh(new THREE.ConeGeometry(2.6, 1.5, 4), mats.roof);
-  museumRoof.position.y = 3.35;
-  museumRoof.rotation.y = Math.PI * 0.25;
-  museumRoof.castShadow = true;
+  const museum = createStyledBuilding({ mats, width: 4.4, depth: 3.3, wallH: 2.8, roofW: 2.8, roofH: 1.65, trim: '#334155' });
   const pillarGeo = new THREE.CylinderGeometry(0.12, 0.12, 1.4, 8);
   for (let i = -1; i <= 1; i += 1) {
     const col = new THREE.Mesh(pillarGeo, new THREE.MeshStandardMaterial({ color: '#d6d3d1', roughness: 0.85 }));
@@ -1519,7 +1553,10 @@ function buildThreeWorld() {
     col.castShadow = true;
     museum.add(col);
   }
-  museum.add(museumBase, museumRoof);
+  const museumBadge = new THREE.Mesh(new THREE.RingGeometry(0.28, 0.48, 22), new THREE.MeshStandardMaterial({ color: '#a78bfa', roughness: 0.38, metalness: 0.62 }));
+  museumBadge.position.set(0, 2.25, 1.72);
+  museumBadge.rotation.y = Math.PI;
+  museum.add(museumBadge);
   museum.position.set(MUSEUM_PLOT.x / TILE - MAP_W / 2 + 2.1, 0, MUSEUM_PLOT.y / TILE - MAP_H / 2 + 1.2);
   render3d.museum = museum;
   render3d.world.add(museum);
@@ -1566,11 +1603,12 @@ async function ensure3DWorld() {
 
     const camera = new THREE.PerspectiveCamera(55, 16 / 9, 0.1, 220);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
     renderer.shadowMap.enabled = true;
-    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.shadowMap.type = THREE.VSMShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.02;
+    renderer.toneMappingExposure = 1.12;
     renderer.physicallyCorrectLights = true;
     ui.game3d.appendChild(renderer.domElement);
 
@@ -1580,15 +1618,17 @@ async function ensure3DWorld() {
     const sun = new THREE.DirectionalLight('#fff4df', 4.8);
     sun.position.set(25, 42, 12);
     sun.castShadow = true;
-    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.mapSize.set(4096, 4096);
     sun.shadow.camera.left = -35;
     sun.shadow.camera.right = 35;
     sun.shadow.camera.top = 35;
     sun.shadow.camera.bottom = -35;
-    sun.shadow.bias = -0.00035;
+    sun.shadow.bias = -0.00015;
+    sun.shadow.normalBias = 0.028;
+    sun.shadow.radius = 2.2;
     scene.add(sun);
 
-    const bounce = new THREE.DirectionalLight('#9ec5ff', 1.0);
+    const bounce = new THREE.DirectionalLight('#9ec5ff', 1.35);
     bounce.position.set(-16, 12, -22);
     scene.add(bounce);
 
@@ -1713,7 +1753,7 @@ function renderWorld3D() {
   render3d.scene.background.set(rainy ? '#7f97ad' : '#9ad2ff');
   render3d.scene.fog.near = rainy ? 16 : 26;
   render3d.scene.fog.far = rainy ? 68 : 95;
-  render3d.renderer.toneMappingExposure = rainy ? 0.9 : 1.06;
+  render3d.renderer.toneMappingExposure = rainy ? 0.96 : 1.2;
 
   if (render3d.skyDome) {
     render3d.skyDome.material.color.set(rainy ? '#8ea9c0' : '#b9dcff');
