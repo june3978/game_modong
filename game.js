@@ -40,6 +40,10 @@ const HOUSE_PLOT = { x: 470, y: 520, w: 180, h: 140 };
 const FARM = { x: 240, y: 560, w: 180, h: 120 };
 const SHOP_PLOT = { x: 980, y: 500, w: 180, h: 130 };
 const MUSEUM_PLOT = { x: 1120, y: 290, w: 210, h: 145 };
+const FOUNTAIN = { x: 760, y: 520 };
+const CAMPFIRE = { x: 660, y: 640 };
+const LOOKOUT = { x: 1320, y: 420 };
+const PIER = { x: (WATER.x1 + 1) * TILE, y: BRIDGE.y * TILE + 60 };
 
 const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   Array.from({ length: MAP_W }, (_, gx) => {
@@ -59,7 +63,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v1.9: NPC/조개 동선 안정화 + 3D 상호작용 보강',
+  msg: 'v2.0: 그래픽/상점·상호작용 20+20 패스',
   msgTimer: 280,
   prompt: '',
   logs: ['게임 시작'],
@@ -103,7 +107,9 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v1.9',
+  version: 'v2.0',
+  buffs: { fish: 0, bug: 0, harvest: 0, discount: 0 },
+  interactionFlags: {},
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -189,7 +195,7 @@ function rollResidentRequests() {
 }
 
 function catchBugAction() {
-  const chance = 0.55 + (state.dailyEvent === '꽃 축제' ? 0.2 : 0);
+  const chance = 0.55 + (state.dailyEvent === '꽃 축제' ? 0.2 : 0) + state.buffs.bug * 0.06;
   if (Math.random() < chance) {
     state.inv.bug += 1;
     state.xp += 9;
@@ -361,6 +367,23 @@ function drawWorld() {
   drawFarmArea();
   if (state.bridgeBuilt) drawBridge();
   drawHouseExterior();
+  drawInteractionPOIs();
+}
+
+function drawInteractionPOIs() {
+  const pois = [
+    { p: FOUNTAIN, icon: '⛲' },
+    { p: CAMPFIRE, icon: '🔥' },
+    { p: LOOKOUT, icon: '🗼' },
+    { p: PIER, icon: '🎣' },
+  ];
+  pois.forEach(({ p, icon }) => {
+    const sp = worldToScreen(p.x, p.y);
+    ctx.fillStyle = 'rgba(255,255,255,0.75)';
+    ctx.fillRect(sp.x - 16, sp.y - 34, 32, 20);
+    ctx.fillStyle = '#0f172a';
+    ctx.fillText(icon, sp.x - 7, sp.y - 20);
+  });
 }
 
 
@@ -676,8 +699,9 @@ function handleFarmAction() {
 
   const ready = state.crops.find((c) => c.stage >= 3);
   if (ready) {
-    state.inv.flower += 2;
-    state.inv.berry += 1;
+    const mul = 1 + Math.max(0, state.buffs.harvest * 0.5);
+    state.inv.flower += Math.round(2 * mul);
+    state.inv.berry += Math.round(1 * mul);
     state.crops = state.crops.filter((c) => c !== ready);
     setMsg('작물 수확! 꽃 +2, 열매 +1');
     addLog('농사 수확 완료');
@@ -764,7 +788,7 @@ function updateFishing() {
     f.progress = clamp(f.progress, 0, 100);
 
     if (f.progress >= 100) {
-      state.inv.fish += 1;
+      state.inv.fish += 1 + (state.buffs.fish > 1 ? 1 : 0);
       state.xp += 16 + (state.dailyEvent === '낚시 대잔치' ? 8 : 0);
       setMsg('낚시 성공! 물고기 +1');
       f.active = false;
@@ -877,6 +901,32 @@ function interact() {
     return;
   }
 
+  const oncePerDay = (key) => {
+    if (state.interactionFlags[key] === state.day) return false;
+    state.interactionFlags[key] = state.day;
+    return true;
+  };
+
+  if (dist(state.player, FOUNTAIN) < 72 && oncePerDay('fountain')) {
+    state.player.mood = clamp(state.player.mood + 14, 0, 100);
+    state.buffs.discount = clamp(state.buffs.discount + 1, 0, 3);
+    return setMsg('분수의 축복! 기분+할인 버프 획득');
+  }
+  if (dist(state.player, CAMPFIRE) < 78 && oncePerDay('campfire')) {
+    state.player.energy = clamp(state.player.energy + 20, 0, 100);
+    state.player.mood = clamp(state.player.mood + 10, 0, 100);
+    return setMsg('모닥불 휴식 완료! 에너지/기분 회복');
+  }
+  if (dist(state.player, LOOKOUT) < 74 && oncePerDay('lookout')) {
+    state.xp += 24;
+    state.coins += 18;
+    return setMsg('전망대 탐색 보상! XP+24, 코인+18');
+  }
+  if (dist(state.player, PIER) < 76 && oncePerDay('pier')) {
+    state.buffs.fish = clamp(state.buffs.fish + 1, 0, 3);
+    return setMsg('피어 포인트 발견! 오늘 낚시 보정 상승');
+  }
+
   const nearest = state.npcs.map((n) => ({ n, d: dist(state.player, n) })).sort((a, b) => a.d - b.d)[0];
   if (nearest && nearest.d < 80) {
     const n = nearest.n;
@@ -944,11 +994,27 @@ function openCraft() {
 }
 
 function openShop() {
+  const d = Math.max(0, state.buffs.discount);
+  const discounted = (p) => Math.max(1, Math.floor(p * (1 - d * 0.08)));
   const html = `
-  <div class="shop-item"><span>집 건축권 (150 코인)</span><button data-shop="house">구매</button></div>
-  <div class="shop-item"><span>집 업그레이드 (250 코인)</span><button data-shop="upgrade">업그레이드</button></div>
-  <div class="shop-item"><span>꽃씨 패키지 (${state.shopStock.seedpackPrice} 코인)</span><button data-shop="seedpack">구매</button></div>
-  <div class="shop-item"><span>기성 가구 (${state.shopStock.furniturePrice} 코인)</span><button data-shop="furniture">구매</button></div>
+  <div class="shop-item"><span>집 건축권 (${discounted(150)} 코인)</span><button data-shop="house">구매</button></div>
+  <div class="shop-item"><span>집 업그레이드 (${discounted(250)} 코인)</span><button data-shop="upgrade">업그레이드</button></div>
+  <div class="shop-item"><span>꽃씨 패키지 (${discounted(state.shopStock.seedpackPrice)} 코인)</span><button data-shop="seedpack">구매</button></div>
+  <div class="shop-item"><span>프리미엄 씨앗 (${discounted(42)} 코인, seed+7)</span><button data-shop="seedpack2">구매</button></div>
+  <div class="shop-item"><span>기성 가구 (${discounted(state.shopStock.furniturePrice)} 코인)</span><button data-shop="furniture">구매</button></div>
+  <div class="shop-item"><span>디럭스 가구 (${discounted(88)} 코인, furniture+2)</span><button data-shop="furniture2">구매</button></div>
+  <div class="shop-item"><span>미끼 박스 (${discounted(28)} 코인, 낚시 보정)</span><button data-shop="baitbox">구매</button></div>
+  <div class="shop-item"><span>채집 장갑 (${discounted(24)} 코인, 곤충 보정)</span><button data-shop="bugkit">구매</button></div>
+  <div class="shop-item"><span>수확 비료 (${discounted(30)} 코인, 수확 보정)</span><button data-shop="fertilizer">구매</button></div>
+  <div class="shop-item"><span>에너지 드링크 (${discounted(18)} 코인)</span><button data-shop="energydrink">구매</button></div>
+  <div class="shop-item"><span>무드 허브티 (${discounted(16)} 코인)</span><button data-shop="moodtea">구매</button></div>
+  <div class="shop-item"><span>교환권 (${discounted(35)} 코인, 요청 리롤)</span><button data-shop="rerollrequest">구매</button></div>
+  <div class="shop-item"><span>광고권 (${discounted(45)} 코인, 퀘스트 리롤)</span><button data-shop="rerollquest">구매</button></div>
+  <div class="shop-item"><span>할인 스탬프 (${discounted(40)} 코인)</span><button data-shop="discountstamp">구매</button></div>
+  <div class="shop-item"><span>날씨 부적(맑음) (${discounted(34)} 코인)</span><button data-shop="weatherclear">구매</button></div>
+  <div class="shop-item"><span>날씨 부적(비) (${discounted(34)} 코인)</span><button data-shop="weatherrain">구매</button></div>
+  <div class="shop-item"><span>박물관 패스 (${discounted(54)} 코인, 기증 보너스)</span><button data-shop="museumpass">구매</button></div>
+  <div class="shop-item"><span>다리 보수 키트 (${discounted(48)} 코인)</span><button data-shop="bridgefix">구매</button></div>
   <div class="shop-item"><span>물고기 판매 (${state.shopStock.fishPrice} 코인/개)</span><button data-shop="sellfish">판매</button></div>
   <div class="shop-item"><span>곤충 판매 (${Math.floor(state.shopStock.fishPrice*0.8)} 코인/개)</span><button data-shop="sellbug">판매</button></div>`;
   openModal('상점(일일 변동)', html);
@@ -1000,6 +1066,16 @@ function openMuseum() {
 }
 
 function bindModalActions() {
+  const discount = (p) => Math.max(1, Math.floor(p * (1 - Math.max(0, state.buffs.discount) * 0.08)));
+  const spend = (cost) => {
+    if (state.coins < cost) {
+      setMsg('코인이 부족합니다.');
+      return false;
+    }
+    state.coins -= cost;
+    return true;
+  };
+
   ui.modalBody.querySelectorAll('button').forEach((btn) => {
     btn.addEventListener('click', () => {
       const c = btn.dataset.craft;
@@ -1034,22 +1110,60 @@ function bindModalActions() {
 
       if (s === 'house') {
         if (state.house.tier > 0) return setMsg('이미 집을 보유 중입니다.');
-        if (state.coins >= 150) { state.coins -= 150; state.house.tier = 1; addLog('집 건축 완료'); setMsg('오두막 건축 완료! 문 앞에서 E로 입장.'); }
-        else setMsg('코인이 부족합니다.');
+        if (spend(discount(150))) { state.house.tier = 1; addLog('집 건축 완료'); setMsg('오두막 건축 완료! 문 앞에서 E로 입장.'); }
       }
       if (s === 'upgrade') {
         if (state.house.tier === 0) return setMsg('먼저 집을 구매하세요.');
         if (state.house.tier >= 2) return setMsg('최대 업그레이드입니다.');
-        if (state.coins >= 250) { state.coins -= 250; state.house.tier = 2; addLog('집 업그레이드 완료'); setMsg('집 업그레이드 완료!'); }
-        else setMsg('코인이 부족합니다.');
+        if (spend(discount(250))) { state.house.tier = 2; addLog('집 업그레이드 완료'); setMsg('집 업그레이드 완료!'); }
       }
       if (s === 'seedpack') {
-        if (state.coins >= state.shopStock.seedpackPrice) { state.coins -= state.shopStock.seedpackPrice; state.inv.seed += 3; setMsg('꽃씨 패키지 구매 완료 (seed +3).'); }
-        else setMsg('코인이 부족합니다.');
+        if (spend(discount(state.shopStock.seedpackPrice))) { state.inv.seed += 3; setMsg('꽃씨 패키지 구매 완료 (seed +3).'); }
+      }
+      if (s === 'seedpack2') {
+        if (spend(discount(42))) { state.inv.seed += 7; state.xp += 8; setMsg('프리미엄 씨앗 구매 완료 (seed +7).'); }
       }
       if (s === 'furniture') {
-        if (state.coins >= state.shopStock.furniturePrice) { state.coins -= state.shopStock.furniturePrice; state.inv.furniture += 1; setMsg('기성 가구 구매 완료.'); }
-        else setMsg('코인이 부족합니다.');
+        if (spend(discount(state.shopStock.furniturePrice))) { state.inv.furniture += 1; setMsg('기성 가구 구매 완료.'); }
+      }
+      if (s === 'furniture2') {
+        if (spend(discount(88))) { state.inv.furniture += 2; state.decorScore = calcDecorScore(); setMsg('디럭스 가구 구매 완료 (furniture +2).'); }
+      }
+      if (s === 'baitbox') {
+        if (spend(discount(28))) { state.buffs.fish = clamp(state.buffs.fish + 1, 0, 3); state.fishing.zoneWidth = clamp(state.fishing.zoneWidth + 0.03, 0.14, 0.38); setMsg('미끼 박스 사용! 오늘 낚시 보정 상승'); }
+      }
+      if (s === 'bugkit') {
+        if (spend(discount(24))) { state.buffs.bug = clamp(state.buffs.bug + 1, 0, 3); setMsg('채집 장갑 장착! 곤충 채집 확률 상승'); }
+      }
+      if (s === 'fertilizer') {
+        if (spend(discount(30))) { state.buffs.harvest = clamp(state.buffs.harvest + 1, 0, 3); setMsg('수확 비료 적용! 농사 수확량 상승'); }
+      }
+      if (s === 'energydrink') {
+        if (spend(discount(18))) { state.player.energy = clamp(state.player.energy + 28, 0, 100); setMsg('에너지 회복!'); }
+      }
+      if (s === 'moodtea') {
+        if (spend(discount(16))) { state.player.mood = clamp(state.player.mood + 24, 0, 100); setMsg('기분이 좋아졌어요!'); }
+      }
+      if (s === 'rerollrequest') {
+        if (spend(discount(35))) { rollResidentRequests(); setMsg('주민 요청이 새로 갱신되었습니다.'); }
+      }
+      if (s === 'rerollquest') {
+        if (spend(discount(45))) { state.questIndex = (state.questIndex + 1) % state.quests.length; state.questDone = false; setMsg(`퀘스트 리롤: ${state.quests[state.questIndex].title}`); }
+      }
+      if (s === 'discountstamp') {
+        if (spend(discount(40))) { state.buffs.discount = clamp(state.buffs.discount + 1, 0, 3); setMsg('상점 할인 스탬프 적용!'); }
+      }
+      if (s === 'weatherclear') {
+        if (spend(discount(34))) { state.weather = 'sunny'; setMsg('날씨가 맑아졌어요.'); }
+      }
+      if (s === 'weatherrain') {
+        if (spend(discount(34))) { state.weather = 'rainy'; setMsg('비가 내리기 시작했어요.'); }
+      }
+      if (s === 'museumpass') {
+        if (spend(discount(54))) { state.coins += 20; state.xp += 16; setMsg('박물관 패스 보너스: 코인 +20, XP +16'); }
+      }
+      if (s === 'bridgefix') {
+        if (spend(discount(48))) { state.bridgeBuilt = true; setMsg('다리 보수가 완료되어 이동이 안정화되었습니다.'); }
       }
       if (m) {
         donateToMuseum(m);
@@ -1195,6 +1309,8 @@ function updateCalendar() {
     }
     state.weather = Math.random() > 0.7 ? 'rainy' : 'sunny';
     state.dailyEvent = EVENTS[state.day % EVENTS.length];
+    state.buffs = { fish: 0, bug: 0, harvest: 0, discount: 0 };
+    state.interactionFlags = {};
     calcDailyShopStock();
     rollResidentRequests();
     applyDailyEventEffect();
@@ -1623,6 +1739,24 @@ function buildThreeWorld() {
   render3d.museum = museum;
   render3d.world.add(museum);
 
+  const poiMat = new THREE.MeshStandardMaterial({ color: '#22d3ee', roughness: 0.4, metalness: 0.65, emissive: '#0ea5e9', emissiveIntensity: 0.35 });
+  const to3DPoint = (pt) => ({ x: pt.x / TILE - MAP_W / 2, z: pt.y / TILE - MAP_H / 2 });
+  const poiDefs = [
+    { key: 'fountain', pt: FOUNTAIN, color: '#60a5fa' },
+    { key: 'campfire', pt: CAMPFIRE, color: '#fb923c' },
+    { key: 'lookout', pt: LOOKOUT, color: '#c4b5fd' },
+    { key: 'pier', pt: PIER, color: '#34d399' },
+  ];
+  render3d.poiMeshes = poiDefs.map((d) => {
+    const p = to3DPoint(d.pt);
+    const m = new THREE.Mesh(new THREE.OctahedronGeometry(0.28, 0), poiMat.clone());
+    m.material.color.set(d.color);
+    m.position.set(p.x, 1.1, p.z);
+    m.castShadow = true;
+    render3d.world.add(m);
+    return m;
+  });
+
   render3d.player = createRigCharacter('#3b82f6', '#1e293b', 1);
   render3d.world.add(render3d.player);
   markAssetStats('model', true);
@@ -1839,6 +1973,14 @@ function renderWorld3D() {
     }
   }
 
+  if (render3d.poiMeshes?.length) {
+    render3d.poiMeshes.forEach((m, i) => {
+      m.rotation.y += 0.02 + i * 0.002;
+      m.position.y = 1.05 + Math.sin(state.time * 0.05 + i) * 0.18;
+      m.material.emissiveIntensity = 0.25 + Math.sin(state.time * 0.04 + i) * 0.08;
+    });
+  }
+
   render3d.renderer.render(render3d.scene, render3d.camera);
 }
 
@@ -1882,6 +2024,10 @@ function updateUI() {
   if (state.house.tier > 0 && dist(state.player, { x: state.house.doorX, y: state.house.doorY }) < 66) state.prompt = 'E: 집 출입';
   else if (dist(state.player, shopDoor) < 70) state.prompt = 'E: 상점 이용';
   else if (dist(state.player, museumDoor) < 74) state.prompt = 'E: 박물관 이용';
+  else if (dist(state.player, FOUNTAIN) < 78) state.prompt = 'E: 분수 축복 받기';
+  else if (dist(state.player, CAMPFIRE) < 82) state.prompt = 'E: 모닥불 휴식';
+  else if (dist(state.player, LOOKOUT) < 78) state.prompt = 'E: 전망대 탐색';
+  else if (dist(state.player, PIER) < 80) state.prompt = 'E: 피어 낚시 버프';
   else {
     const nearNpc = state.npcs.find((n) => dist(state.player, n) < 82);
     if (nearNpc) state.prompt = `E: ${nearNpc.name}와 대화`;
