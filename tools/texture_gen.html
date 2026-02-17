@@ -1,0 +1,222 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Stylized Texture Generator</title>
+  <style>
+    :root { color-scheme: dark; }
+    body { margin: 0; font-family: system-ui, sans-serif; background:#0f172a; color:#e2e8f0; }
+    header { padding:16px 20px; border-bottom:1px solid #334155; }
+    main { padding:16px 20px; display:grid; grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); gap:14px; }
+    .card { background:#111827; border:1px solid #334155; border-radius:12px; padding:12px; }
+    canvas { width:100%; image-rendering: pixelated; background:#020617; border-radius:8px; border:1px solid #1e293b; }
+    .row { display:flex; gap:8px; margin-top:10px; flex-wrap:wrap; }
+    button { border:0; border-radius:8px; padding:8px 10px; background:#2563eb; color:white; cursor:pointer; }
+    button.secondary { background:#334155; }
+    .hint { color:#94a3b8; font-size:13px; padding:0 20px 18px; }
+  </style>
+</head>
+<body>
+  <header>
+    <h1>🎨 동숲풍 텍스처 생성기</h1>
+    <div>Canvas 2D로 타일 가능한 텍스처를 생성합니다.</div>
+    <div class="row" style="margin-top:10px;">
+      <button id="btnRegenerate">다시 생성</button>
+      <button id="btnSaveAll" class="secondary">assets/로 저장</button>
+    </div>
+  </header>
+  <main id="grid"></main>
+  <p class="hint">File System Access API를 지원하지 않는 브라우저에서는 개별 PNG 다운로드를 사용하세요.</p>
+
+<script>
+const SPECS = [
+  { key:'grass_color', w:256, h:256, label:'grass_color.png' },
+  { key:'dirt_color', w:256, h:256, label:'dirt_color.png' },
+  { key:'wood_color', w:256, h:256, label:'wood_color.png' },
+  { key:'roof_color', w:256, h:256, label:'roof_color.png' },
+  { key:'water_normal', w:256, h:256, label:'water_normal.png' },
+  { key:'toon_ramp', w:256, h:16, label:'toon_ramp.png' },
+];
+
+const grid = document.getElementById('grid');
+const assets = new Map();
+
+const TAU = Math.PI * 2;
+function periodicNoise(x, y, w, h) {
+  const nx = TAU * x / w;
+  const ny = TAU * y / h;
+  const s1 = Math.sin(nx * 1.0 + ny * 1.7);
+  const s2 = Math.sin(nx * 2.9 - ny * 2.2 + 1.3);
+  const s3 = Math.sin(nx * 5.1 + ny * 3.7 + 2.4);
+  return (s1 * 0.5 + s2 * 0.3 + s3 * 0.2 + 1) * 0.5;
+}
+function lerp(a,b,t){ return a + (b-a) * t; }
+function rgb(ctx, img, i, r,g,b,a=255){ img.data[i]=r; img.data[i+1]=g; img.data[i+2]=b; img.data[i+3]=a; }
+
+function generateGrass(ctx, w, h){
+  const img = ctx.createImageData(w,h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const n = periodicNoise(x,y,w,h);
+    const blades = Math.sin((x+y) * 0.35) * 0.06;
+    const v = Math.max(0, Math.min(1, n*0.85 + blades + 0.08));
+    const r = Math.round(lerp(106, 155, v));
+    const g = Math.round(lerp(152, 212, v));
+    const b = Math.round(lerp(86, 132, v));
+    rgb(ctx,img,(y*w+x)*4,r,g,b);
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function generateDirt(ctx,w,h){
+  const img=ctx.createImageData(w,h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const n=periodicNoise(x,y,w,h);
+    const grain=Math.sin((x*0.75+y*0.45))*0.08;
+    const v=Math.max(0,Math.min(1,n*0.75+grain+0.14));
+    const r=Math.round(lerp(123,173,v));
+    const g=Math.round(lerp(92,136,v));
+    const b=Math.round(lerp(70,104,v));
+    rgb(ctx,img,(y*w+x)*4,r,g,b);
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function generateWood(ctx,w,h){
+  const img=ctx.createImageData(w,h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const ring = Math.sin((x/w)*TAU*8 + periodicNoise(x,y,w,h)*2.4);
+    const n = periodicNoise(x,y,w,h);
+    const v = Math.max(0,Math.min(1,0.55 + ring*0.18 + (n-0.5)*0.35));
+    const r=Math.round(lerp(126,176,v));
+    const g=Math.round(lerp(90,134,v));
+    const b=Math.round(lerp(63,95,v));
+    rgb(ctx,img,(y*w+x)*4,r,g,b);
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function generateRoof(ctx,w,h){
+  const img=ctx.createImageData(w,h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const rows = Math.floor((y/h)*16);
+    const offset = (rows % 2) * 0.5;
+    const tileBand = Math.sin(((x/w)*TAU*12) + offset);
+    const n = periodicNoise(x,y,w,h);
+    const v = Math.max(0,Math.min(1,0.48 + tileBand*0.1 + (n-0.5)*0.25));
+    const r=Math.round(lerp(175,220,v));
+    const g=Math.round(lerp(95,154,v));
+    const b=Math.round(lerp(106,168,v));
+    rgb(ctx,img,(y*w+x)*4,r,g,b);
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function generateWaterNormal(ctx,w,h){
+  const img=ctx.createImageData(w,h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const nx = (periodicNoise(x+1,y,w,h)-periodicNoise(x-1,y,w,h))*0.8;
+    const ny = (periodicNoise(x,y+1,w,h)-periodicNoise(x,y-1,w,h))*0.8;
+    let nz = 1.0;
+    const len = Math.hypot(nx,ny,nz);
+    const rx = nx/len, ry = ny/len, rz = nz/len;
+    const r=Math.round((rx*0.5+0.5)*255);
+    const g=Math.round((ry*0.5+0.5)*255);
+    const b=Math.round((rz*0.5+0.5)*255);
+    rgb(ctx,img,(y*w+x)*4,r,g,b);
+  }
+  ctx.putImageData(img,0,0);
+}
+
+function generateToonRamp(ctx,w,h){
+  const steps=[0.22,0.38,0.56,0.74,0.9,1.0];
+  const img=ctx.createImageData(w,h);
+  for(let y=0;y<h;y++) for(let x=0;x<w;x++){
+    const t=x/(w-1);
+    const s=steps[Math.min(steps.length-1, Math.floor(t*steps.length))];
+    const v=Math.round(s*255);
+    rgb(ctx,img,(y*w+x)*4,v,v,v);
+  }
+  ctx.putImageData(img,0,0);
+}
+
+const generators={
+  grass_color: generateGrass,
+  dirt_color: generateDirt,
+  wood_color: generateWood,
+  roof_color: generateRoof,
+  water_normal: generateWaterNormal,
+  toon_ramp: generateToonRamp,
+};
+
+function downloadCanvas(canvas, filename){
+  const a=document.createElement('a');
+  a.href=canvas.toDataURL('image/png');
+  a.download=filename;
+  a.click();
+}
+
+async function saveToAssets(canvas, filename){
+  if(!window.showDirectoryPicker) throw new Error('API_NOT_SUPPORTED');
+  const dir=await window.showDirectoryPicker();
+  const assetsDir=await dir.getDirectoryHandle('assets', { create:true });
+  const stylizedDir=await assetsDir.getDirectoryHandle('stylized', { create:true });
+  const fileHandle=await stylizedDir.getFileHandle(filename, { create:true });
+  const stream=await fileHandle.createWritable();
+  const blob=await new Promise((resolve)=>canvas.toBlob(resolve,'image/png'));
+  await stream.write(blob);
+  await stream.close();
+}
+
+function buildCard(spec){
+  const card=document.createElement('section');
+  card.className='card';
+  const title=document.createElement('h3');
+  title.textContent=spec.label;
+  const canvas=document.createElement('canvas');
+  canvas.width=spec.w; canvas.height=spec.h;
+  const ctx=canvas.getContext('2d');
+  ctx.imageSmoothingEnabled=false;
+  generators[spec.key](ctx,spec.w,spec.h);
+  assets.set(spec.key,{spec,canvas});
+
+  const row=document.createElement('div');
+  row.className='row';
+  const btnDown=document.createElement('button');
+  btnDown.textContent='PNG 다운로드';
+  btnDown.onclick=()=>downloadCanvas(canvas,spec.label);
+  const btnSave=document.createElement('button');
+  btnSave.textContent='assets/로 저장';
+  btnSave.className='secondary';
+  btnSave.disabled=!window.showDirectoryPicker;
+  btnSave.onclick=async()=>{
+    try{ await saveToAssets(canvas,spec.label); alert(`${spec.label} 저장 완료`); }
+    catch(err){ if(String(err).includes('AbortError')) return; alert(`${spec.label} 저장 실패: ${err.message||err}`); }
+  };
+  row.append(btnDown,btnSave);
+  card.append(title,canvas,row);
+  return card;
+}
+
+function renderAll(){
+  grid.innerHTML='';
+  assets.clear();
+  SPECS.forEach((spec)=>grid.appendChild(buildCard(spec)));
+}
+
+document.getElementById('btnRegenerate').addEventListener('click', renderAll);
+document.getElementById('btnSaveAll').addEventListener('click', async()=>{
+  if(!window.showDirectoryPicker){ alert('이 브라우저는 File System Access API를 지원하지 않습니다.'); return; }
+  try{
+    for(const {spec,canvas} of assets.values()) await saveToAssets(canvas,spec.label);
+    alert('모든 텍스처를 assets/stylized 에 저장했습니다.');
+  }catch(err){
+    if(String(err).includes('AbortError')) return;
+    alert(`저장 실패: ${err.message||err}`);
+  }
+});
+
+renderAll();
+</script>
+</body>
+</html>

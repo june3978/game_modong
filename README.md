@@ -116,3 +116,15 @@ python3 -m http.server 8000
 - 아이템 시트(`items.png`) 배치: 1행 기준 `wood, flower, berry, shell, fish, bug, seed, furniture`.
 - 게임 내 표시 스케일은 캐릭터 기준 약 3배(`SPRITE_SCALE = 3`)이며 타일은 기존 TILE 크기에 맞춰 확대됩니다.
 - 스프라이트 미제공 상태에서도 게임플레이(낚시/농사/상점/퀘스트/저장/3D모드)는 유지됩니다.
+
+## 텍스처 생성 방법 (외부 이미지 없이)
+
+`tools/texture_gen.html`을 브라우저에서 열면 동숲풍 기본 텍스처를 Canvas 2D로 자동 생성합니다.
+
+- 생성 대상: `grass_color`, `dirt_color`, `wood_color`, `roof_color`, `water_normal`, `toon_ramp`
+- 각 카드에서 **PNG 다운로드**로 개별 파일 저장 가능
+- Chromium 계열처럼 File System Access API를 지원하면 **assets/로 저장** 버튼으로
+  `assets/stylized/*.png`에 바로 저장 가능
+- 텍스처는 주기함수 기반 노이즈를 사용해서 가장자리 이음새가 자연스럽게 반복(tileable)됩니다.
+- 게임은 `createWorldMaterials()`에서 `assets/stylized/*`를 **최우선**으로 로드하고,
+  파일이 없으면 기존 원격 텍스처 체인/절차적 폴백으로 자동 전환됩니다.

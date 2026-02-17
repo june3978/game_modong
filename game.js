@@ -2236,15 +2236,29 @@ function addOutlineToObject(object3d, scale = 1.03, color = '#1e293b') {
 
 function createWorldMaterials(style = state.renderStyle || 'pbr') {
   const isToon = style === 'toon';
-  const toonGrad = createToonGradientTexture(6);
-  const waterNormal = createWaterNormalCanvasTexture(128);
+  const generatedToonRamp = createToonGradientTexture(6);
+  const toonGrad = createRemoteTexture([
+    'assets/stylized/toon_ramp.png',
+    generatedToonRamp.image.toDataURL('image/png'),
+  ], [1, 1], '#b8b8b8');
+  toonGrad.minFilter = THREE.NearestFilter;
+  toonGrad.magFilter = THREE.NearestFilter;
+  toonGrad.generateMipmaps = false;
+  const generatedWaterNormal = createWaterNormalCanvasTexture(128);
+  const waterNormal = createRemoteTexture([
+    'assets/stylized/water_normal.png',
+    generatedWaterNormal.image.toDataURL('image/png'),
+    'https://threejs.org/examples/textures/waternormals.jpg',
+  ], [6, 6], '#7f7fff');
 
   const grassPBR = {
     map: createRemoteTexture([
+      'assets/stylized/grass_color.png',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_diff_1k.jpg',
       'https://threejs.org/examples/textures/terrain/grasslight-big.jpg',
     ], [12, 12], '#7ba06a'),
     normalMap: createRemoteTexture([
+      'assets/stylized/water_normal.png',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_nor_gl_1k.jpg',
       'https://threejs.org/examples/textures/terrain/grasslight-big-nm.jpg',
     ], [12, 12], '#7f7fff'),
@@ -2256,14 +2270,17 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
 
   const woodPBR = {
     map: createRemoteTexture([
+      'assets/stylized/wood_color.png',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_diff_1k.jpg',
       'https://threejs.org/examples/textures/hardwood2_diffuse.jpg',
     ], [4, 4], '#7a6149'),
     normalMap: createRemoteTexture([
+      'assets/stylized/water_normal.png',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_nor_gl_1k.jpg',
       'https://threejs.org/examples/textures/hardwood2_bump.jpg',
     ], [4, 4], '#7f7fff'),
     roughnessMap: createRemoteTexture([
+      'assets/stylized/dirt_color.png',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_rough_1k.jpg',
       'https://threejs.org/examples/textures/hardwood2_roughness.jpg',
     ], [4, 4], '#bcbcbc'),
@@ -2275,9 +2292,9 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
 
   return {
     grass: make({ ...grassPBR, roughness: 0.88, metalness: 0.02 }, '#92d88f'),
-    meadow: make({ color: '#a9e7a0', roughness: 0.9, metalness: 0.01 }, '#a9e7a0'),
-    grove: make({ color: '#7dc37a', roughness: 0.9, metalness: 0.01 }, '#7dc37a'),
-    dirt: make({ color: '#b7a58d', roughness: 0.96, metalness: 0.01 }, '#c5b5a3'),
+    meadow: make({ map: createRemoteTexture(['assets/stylized/grass_color.png'], [12, 12], '#a9e7a0'), color: '#a9e7a0', roughness: 0.9, metalness: 0.01 }, '#a9e7a0'),
+    grove: make({ map: createRemoteTexture(['assets/stylized/grass_color.png'], [12, 12], '#7dc37a'), color: '#7dc37a', roughness: 0.9, metalness: 0.01 }, '#7dc37a'),
+    dirt: make({ map: createRemoteTexture(['assets/stylized/dirt_color.png'], [10, 10], '#b7a58d'), color: '#b7a58d', roughness: 0.96, metalness: 0.01 }, '#c5b5a3'),
     wood: make({ ...woodPBR, roughness: 0.72, metalness: 0.06 }, '#bc8f6e'),
     bark: make({ color: '#85654d', roughness: 0.92 }, '#85654d'),
     leaf: make({ color: '#8fd48f', roughness: 0.84 }, '#8fd48f'),
@@ -2290,7 +2307,7 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
     waterNormal,
     bridge: make({ ...woodPBR, roughness: 0.7, metalness: 0.05 }, '#b58d70'),
     wall: make({ color: '#f4eadf', roughness: 0.78 }, '#f6eee7'),
-    roof: make({ color: '#d49aa1', roughness: 0.7 }, '#d49aa1'),
+    roof: make({ map: createRemoteTexture(['assets/stylized/roof_color.png'], [4, 4], '#d49aa1'), color: '#d49aa1', roughness: 0.7 }, '#d49aa1'),
     npc: make({ color: '#f2b18d', roughness: 0.64 }, '#f2b18d'),
     player: make({ color: '#9cb8f6', roughness: 0.6 }, '#9cb8f6'),
     toonGradient: toonGrad,
