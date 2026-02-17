@@ -56,7 +56,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: '고도화 5단계: 긴 다리 + 박물관 + 업적 + 곤충채집',
+  msg: 'v0.8: 풀 3D 아트 스타일 + 실내 이동 개선',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -83,6 +83,7 @@ const state = {
     doorX: 520,
     doorY: 560,
     editor: { selected: 0 },
+    interiorPlayer: { x: 640, y: 560 },
   },
   fishing: { active: false, phase: 'idle', timer: 0, biteWindow: 0, cursor: 0.1, dir: 1, zoneStart: 0.45, zoneWidth: 0.2, progress: 0 },
   quests: [
@@ -98,7 +99,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v0.7',
+  version: 'v0.8',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -452,7 +453,7 @@ function drawHouseInterior() {
     }
   });
 
-  drawCharacterScreen(canvas.width / 2, canvas.height - 110, '#3b82f6', 'up');
+  drawCharacterScreen(state.house.interiorPlayer.x, state.house.interiorPlayer.y, '#3b82f6', state.player.facing);
 }
 
 function drawResource(o) {
@@ -793,7 +794,9 @@ function interact() {
 
   if (state.house.tier > 0 && dist(state.player, { x: state.house.doorX, y: state.house.doorY }) < 42) {
     state.house.inside = true;
-    setMsg('집 안으로 들어왔습니다. F 배치 / IJKL 이동 / T 회전 / Tab 전환');
+    state.house.interiorPlayer = { x: canvas.width / 2, y: canvas.height - 110 };
+    state.player.facing = 'up';
+    setMsg('집 안으로 들어왔습니다. 이동 가능: WASD/방향키 · F 배치 · IJKL/T/Tab 편집');
     return;
   }
 
@@ -999,7 +1002,8 @@ function bindModalActions() {
 }
 
 function playerMove() {
-  if (state.player.pause || state.house.inside) return;
+  if (state.player.pause) return;
+
   let dx = 0;
   let dy = 0;
   const run = state.keys.has('Shift');
@@ -1010,9 +1014,27 @@ function playerMove() {
   if (state.keys.has('ArrowLeft') || state.keys.has('a')) { dx -= spd; state.player.facing = 'left'; }
   if (state.keys.has('ArrowRight') || state.keys.has('d')) { dx += spd; state.player.facing = 'right'; }
 
-  const nx = clamp(state.player.x + dx, 16, WORLD_W - 16);
-  const ny = clamp(state.player.y + dy, 16, WORLD_H - 16);
-  if (isWalkable(nx, ny)) { state.player.x = nx; state.player.y = ny; }
+  if (state.house.inside) {
+    const p = state.house.interiorPlayer;
+    const nx = clamp(p.x + dx, 70, canvas.width - 70);
+    const ny = clamp(p.y + dy, 96, canvas.height - 48);
+
+    let blocked = false;
+    state.house.furniture.forEach((f) => {
+      const fx = 200 + f.gx * 80;
+      const fy = 120 + f.gy * 70;
+      if (nx > fx - 14 && nx < fx + 78 && ny > fy - 12 && ny < fy + 54) blocked = true;
+    });
+
+    if (!blocked) {
+      p.x = nx;
+      p.y = ny;
+    }
+  } else {
+    const nx = clamp(state.player.x + dx, 16, WORLD_W - 16);
+    const ny = clamp(state.player.y + dy, 16, WORLD_H - 16);
+    if (isWalkable(nx, ny)) { state.player.x = nx; state.player.y = ny; }
+  }
 
   const moving = dx || dy;
   if (moving) {
@@ -1117,14 +1139,16 @@ function projectIso(x, y, z, cam) {
   const sin = Math.sin(cam.yaw);
   const rx = tx * cos - tz * sin;
   const rz = tx * sin + tz * cos;
+  const persp = 1 / (1 + Math.max(-280, rz) * 0.00135);
   return {
-    x: cam.w * 0.5 + rx * cam.scale,
-    y: cam.h * 0.58 + rz * cam.scale * 0.5 - y,
+    x: cam.w * 0.5 + rx * cam.scale * persp,
+    y: cam.h * 0.58 + rz * cam.scale * 0.52 * persp - y * persp,
     depth: rz,
+    persp,
   };
 }
 
-function drawIsoTile(ctx3d, cx, cy, h, color) {
+function drawIsoTile(ctx3d, cx, cy, h, color, shade = 0.18) {
   const hw = 21;
   const hh = 11;
   ctx3d.beginPath();
@@ -1142,17 +1166,32 @@ function drawIsoTile(ctx3d, cx, cy, h, color) {
   ctx3d.lineTo(cx, cy + hh);
   ctx3d.lineTo(cx - hw, cy);
   ctx3d.closePath();
-  ctx3d.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx3d.fillStyle = `rgba(0,0,0,${shade})`;
   ctx3d.fill();
 
   ctx3d.beginPath();
   ctx3d.moveTo(cx + hw, cy - h);
   ctx3d.lineTo(cx, cy - h + hh);
-  ctx3d.lineTo(cx, cy + hh);
+  ctx3d.lineTo(cx, cy +hh);
   ctx3d.lineTo(cx + hw, cy);
   ctx3d.closePath();
-  ctx3d.fillStyle = 'rgba(255,255,255,0.08)';
+  ctx3d.fillStyle = 'rgba(255,255,255,0.12)';
   ctx3d.fill();
+}
+
+function inRect(x, y, r) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
+
+function pathWeight(x, y) {
+  const centerPath = Math.abs(x - 900) < 95;
+  const crossPath = Math.abs(y - 470) < 90 && x > 620 && x < 1180;
+  return centerPath || crossPath;
+}
+
+function farmRects3d() {
+  return [
+    { x: FARM.x - 72, y: FARM.y - 28, w: FARM.w + 120, h: FARM.h + 40 },
+    { x: FARM.x + 460, y: FARM.y - 16, w: FARM.w + 90, h: FARM.h + 26 },
+  ];
 }
 
 function renderWorld3D() {
@@ -1161,88 +1200,190 @@ function renderWorld3D() {
   const w = render3d.canvas.width;
   const h = render3d.canvas.height;
   const day = (Math.sin(state.time * 0.0023) + 1) / 2;
-  ctx3d.fillStyle = `rgb(${70 + day * 60}, ${130 + day * 70}, ${95 + day * 55})`;
+
+  const bg = ctx3d.createLinearGradient(0, 0, 0, h);
+  bg.addColorStop(0, `rgb(${118 + day * 40}, ${187 + day * 38}, ${175 + day * 22})`);
+  bg.addColorStop(1, `rgb(${86 + day * 22}, ${155 + day * 28}, ${124 + day * 18})`);
+  ctx3d.fillStyle = bg;
   ctx3d.fillRect(0, 0, w, h);
 
   const cam = {
     x: state.player.x,
     z: state.player.y,
     yaw: state.camera3d.yaw,
-    scale: clamp(1.2 - ((state.camera3d.dist - 320) / 1000), 0.55, 1.2),
+    scale: clamp(1.26 - ((state.camera3d.dist - 320) / 980), 0.62, 1.22),
     w,
     h,
   };
 
   const drawables = [];
+  const farms = farmRects3d();
 
   for (let gy = 0; gy < MAP_H; gy++) {
     for (let gx = 0; gx < MAP_W; gx++) {
+      const wx = gx * TILE;
+      const wy = gy * TILE;
       const b = biomes[gy][gx];
-      const p = projectIso(gx * TILE, 0, gy * TILE, cam);
-      drawables.push({ type: 'tile', p, b });
+      const p = projectIso(wx, 0, wy, cam);
+      const isFarm = farms.some((f) => inRect(wx, wy, f));
+      const isPath = pathWeight(wx, wy);
+      drawables.push({ type: 'tile', p, b, isFarm, isPath, wx, wy });
     }
   }
 
-  state.objects.slice(0, 160).forEach((o) => {
+  const fenceSegments = [];
+  farms.forEach((f) => {
+    for (let x = f.x; x <= f.x + f.w; x += 28) {
+      fenceSegments.push({ x, y: f.y });
+      fenceSegments.push({ x, y: f.y + f.h });
+    }
+    for (let y = f.y; y <= f.y + f.h; y += 28) {
+      fenceSegments.push({ x: f.x, y });
+      fenceSegments.push({ x: f.x + f.w, y });
+    }
+  });
+  fenceSegments.forEach((f) => {
+    const p = projectIso(f.x, 18, f.y, cam);
+    drawables.push({ type: 'fence', p });
+  });
+
+  state.crops.forEach((c) => {
+    const p = projectIso(c.x, 18 + c.stage * 6, c.y, cam);
+    drawables.push({ type: 'crop', p, stage: c.stage });
+  });
+
+  state.objects.slice(0, 180).forEach((o) => {
     const p = projectIso(o.x, 16 + Math.sin(state.time * 0.04 + o.bob) * 4, o.y, cam);
     drawables.push({ type: 'res', p, o });
   });
 
+  const bushes = [
+    { x: 560, y: 420 }, { x: 1160, y: 420 }, { x: 560, y: 760 }, { x: 1200, y: 760 },
+  ];
+  bushes.forEach((b) => drawables.push({ type: 'bush', p: projectIso(b.x, 26, b.y, cam) }));
+
   state.npcs.forEach((n) => {
-    const p = projectIso(n.x, 28, n.y, cam);
+    const p = projectIso(n.x, 30, n.y, cam);
     drawables.push({ type: 'npc', p, n });
   });
-
-  drawables.push({ type: 'player', p: projectIso(state.player.x, 28, state.player.y, cam) });
+  drawables.push({ type: 'player', p: projectIso(state.player.x, 30, state.player.y, cam) });
 
   if (state.house.tier > 0) {
     drawables.push({ type: 'house', p: projectIso(HOUSE_PLOT.x + 90, 0, HOUSE_PLOT.y + 65, cam) });
   }
-
   if (state.bridgeBuilt) {
-    const p = projectIso((BRIDGE.x1 + BRIDGE.x2) * TILE * 0.5, 0, BRIDGE.y * TILE, cam);
-    drawables.push({ type: 'bridge', p });
+    drawables.push({ type: 'bridge', p: projectIso((BRIDGE.x1 + BRIDGE.x2) * TILE * 0.5, 0, BRIDGE.y * TILE, cam) });
   }
 
   drawables.sort((a, b) => a.p.depth - b.p.depth);
 
   drawables.forEach((d) => {
     if (d.type === 'tile') {
-      const col = d.b === 'water' ? '#4e88d1' : d.b === 'grove' ? '#498f4f' : d.b === 'meadow' ? '#79c969' : '#62af60';
-      drawIsoTile(ctx3d, d.p.x, d.p.y, d.b === 'water' ? 4 : 12, col);
+      let col = d.b === 'water' ? '#4f9be7' : '#66bb64';
+      let hgt = d.b === 'water' ? 3 : 15;
+      if (d.b === 'grove') col = '#5aa85a';
+      if (d.b === 'meadow') col = '#7acc6d';
+      if (d.isPath) { col = '#e3ba80'; hgt = 10; }
+      if (d.isFarm) { col = '#8f5c39'; hgt = 9; }
+      drawIsoTile(ctx3d, d.p.x, d.p.y, hgt, col, d.isPath ? 0.12 : 0.18);
+      if (d.isPath && (Math.floor((d.wx + d.wy) / TILE) % 3 === 0)) {
+        ctx3d.fillStyle = 'rgba(255,255,255,0.15)';
+        ctx3d.beginPath();
+        ctx3d.ellipse(d.p.x, d.p.y - 11, 8, 3, 0, 0, Math.PI * 2);
+        ctx3d.fill();
+      }
       return;
     }
+
+    if (d.type === 'fence') {
+      ctx3d.fillStyle = '#d6a157';
+      ctx3d.fillRect(d.p.x - 3, d.p.y - 28, 6, 24);
+      ctx3d.fillStyle = '#c7904c';
+      ctx3d.fillRect(d.p.x - 8, d.p.y - 12, 16, 5);
+      return;
+    }
+
+    if (d.type === 'crop') {
+      const tall = d.stage >= 3;
+      ctx3d.strokeStyle = tall ? '#d8c34a' : '#2f9e44';
+      ctx3d.lineWidth = tall ? 2.4 : 2;
+      ctx3d.beginPath();
+      ctx3d.moveTo(d.p.x, d.p.y - 6);
+      ctx3d.lineTo(d.p.x, d.p.y - (tall ? 22 : 16));
+      ctx3d.stroke();
+      if (tall) {
+        ctx3d.fillStyle = '#ecd367';
+        ctx3d.fillRect(d.p.x - 3, d.p.y - 24, 6, 8);
+      }
+      return;
+    }
+
     if (d.type === 'bridge') {
       ctx3d.fillStyle = '#8b5a2b';
-      ctx3d.fillRect(d.p.x - 130 * cam.scale, d.p.y - 20, 260 * cam.scale, 12);
+      ctx3d.fillRect(d.p.x - 160 * cam.scale, d.p.y - 18, 320 * cam.scale, 14);
+      ctx3d.fillStyle = '#6d431f';
+      for (let i = -150; i < 150; i += 22) ctx3d.fillRect(d.p.x + i * cam.scale, d.p.y - 18, 2, 14);
       return;
     }
+
     if (d.type === 'house') {
-      ctx3d.fillStyle = '#92400e';
-      ctx3d.fillRect(d.p.x - 46, d.p.y - 70, 92, 64);
-      ctx3d.fillStyle = '#78350f';
+      ctx3d.fillStyle = 'rgba(0,0,0,0.15)';
       ctx3d.beginPath();
-      ctx3d.moveTo(d.p.x - 56, d.p.y - 70);
-      ctx3d.lineTo(d.p.x, d.p.y - 115);
-      ctx3d.lineTo(d.p.x + 56, d.p.y - 70);
+      ctx3d.ellipse(d.p.x + 20, d.p.y + 6, 58, 20, 0, 0, Math.PI * 2);
+      ctx3d.fill();
+      ctx3d.fillStyle = '#c26a1a';
+      ctx3d.fillRect(d.p.x - 54, d.p.y - 88, 108, 78);
+      ctx3d.fillStyle = '#8f3e0f';
+      ctx3d.beginPath();
+      ctx3d.moveTo(d.p.x - 64, d.p.y - 88);
+      ctx3d.lineTo(d.p.x, d.p.y - 132);
+      ctx3d.lineTo(d.p.x + 64, d.p.y - 88);
       ctx3d.closePath();
       ctx3d.fill();
+      ctx3d.fillStyle = '#fde68a';
+      ctx3d.fillRect(d.p.x - 10, d.p.y - 44, 20, 34);
       return;
     }
-    if (d.type === 'res') {
-      const col = d.o.type === 'wood' ? '#5b3b1f' : d.o.type === 'flower' ? '#f472b6' : d.o.type === 'berry' ? '#4f46e5' : d.o.type === 'shell' ? '#e5e7eb' : '#fde68a';
-      ctx3d.fillStyle = col;
+
+    if (d.type === 'bush') {
+      ctx3d.fillStyle = 'rgba(0,0,0,0.12)';
       ctx3d.beginPath();
-      ctx3d.arc(d.p.x, d.p.y - 8, 4, 0, Math.PI * 2);
+      ctx3d.ellipse(d.p.x, d.p.y + 4, 22, 8, 0, 0, Math.PI * 2);
+      ctx3d.fill();
+      ctx3d.fillStyle = '#3ea956';
+      ctx3d.beginPath();
+      ctx3d.arc(d.p.x, d.p.y - 16, 18, 0, Math.PI * 2);
+      ctx3d.fill();
+      ctx3d.fillStyle = '#52bc6a';
+      ctx3d.beginPath();
+      ctx3d.arc(d.p.x - 6, d.p.y - 21, 8, 0, Math.PI * 2);
       ctx3d.fill();
       return;
     }
-    const col = d.type === 'player' ? '#2563eb' : d.n.color;
+
+    if (d.type === 'res') {
+      const col = d.o.type === 'wood' ? '#5b3b1f' : d.o.type === 'flower' ? '#f472b6' : d.o.type === 'berry' ? '#4f46e5' : d.o.type === 'shell' ? '#e5e7eb' : '#fde68a';
+      ctx3d.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx3d.beginPath();
+      ctx3d.ellipse(d.p.x, d.p.y - 2, 5, 2, 0, 0, Math.PI * 2);
+      ctx3d.fill();
+      ctx3d.fillStyle = col;
+      ctx3d.beginPath();
+      ctx3d.arc(d.p.x, d.p.y - 9, 4.5, 0, Math.PI * 2);
+      ctx3d.fill();
+      return;
+    }
+
+    const col = d.type === 'player' ? '#3b82f6' : d.n.color;
+    ctx3d.fillStyle = 'rgba(0,0,0,0.16)';
+    ctx3d.beginPath();
+    ctx3d.ellipse(d.p.x, d.p.y - 4, 10, 4, 0, 0, Math.PI * 2);
+    ctx3d.fill();
     ctx3d.fillStyle = col;
-    ctx3d.fillRect(d.p.x - 6, d.p.y - 26, 12, 21);
+    ctx3d.fillRect(d.p.x - 7, d.p.y - 30, 14, 24);
     ctx3d.fillStyle = '#ffedd5';
     ctx3d.beginPath();
-    ctx3d.arc(d.p.x, d.p.y - 30, 6, 0, Math.PI * 2);
+    ctx3d.arc(d.p.x, d.p.y - 34, 7, 0, Math.PI * 2);
     ctx3d.fill();
   });
 }
@@ -1280,8 +1421,8 @@ function tick() {
   state.time += 1;
   if (state.msgTimer > 0) state.msgTimer -= 1;
 
+  playerMove();
   if (!state.house.inside) {
-    playerMove();
     updateFish();
     updateNPCs();
     collectResources();
