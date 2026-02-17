@@ -56,7 +56,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v1.1: 프리 텍스처/모델 월드 밀도 업그레이드',
+  msg: 'v1.2: 사실적 PBR/날씨 렌더 강화',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -99,7 +99,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v1.1',
+  version: 'v1.2',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -113,6 +113,7 @@ const render3d = {
   canvas: null,
   ctx: null,
   props: [],
+  rain: null,
 };
 
 function setMsg(text, t = 170) { state.msg = text; state.msgTimer = t; }
@@ -1127,8 +1128,9 @@ function createNoiseTexture(base = '#6fa86a', accent = '#4f7f49', size = 256, sc
   return tex;
 }
 
-function createRemoteTexture(url, repeat = [1, 1]) {
-  const fallback = createNoiseTexture('#8aa08a', '#6d826d', 128, 0.12);
+function createRemoteTexture(url, repeat = [1, 1], fallbackColor = '#8aa08a') {
+  const fallback = createNoiseTexture(fallbackColor, '#6d826d', 128, 0.12);
+  fallback.wrapS = fallback.wrapT = THREE.RepeatWrapping;
   fallback.repeat.set(repeat[0], repeat[1]);
   const loader = new THREE.TextureLoader();
   loader.load(
@@ -1146,26 +1148,35 @@ function createRemoteTexture(url, repeat = [1, 1]) {
   return fallback;
 }
 
+function createPBRTextureSet(basePath, repeat = [1, 1], fallbackColor = '#8aa08a') {
+  return {
+    map: createRemoteTexture(`${basePath}_diff_1k.jpg`, repeat, fallbackColor),
+    normalMap: createRemoteTexture(`${basePath}_nor_gl_1k.jpg`, repeat, '#7f7fff'),
+    roughnessMap: createRemoteTexture(`${basePath}_rough_1k.jpg`, repeat, '#bcbcbc'),
+  };
+}
+
 function createWorldMaterials() {
-  const grassTex = createRemoteTexture('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_diff_1k.jpg', [12, 12]);
-  const dirtTex = createRemoteTexture('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground_diff_1k.jpg', [10, 10]);
-  const woodTex = createRemoteTexture('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_diff_1k.jpg', [4, 4]);
-  const roofTex = createRemoteTexture('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_diff_1k.jpg', [3, 3]);
+  const grassPBR = createPBRTextureSet('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04', [12, 12], '#7ba06a');
+  const dirtPBR = createPBRTextureSet('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/muddy_ground/muddy_ground', [10, 10], '#7d6a4f');
+  const woodPBR = createPBRTextureSet('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood', [4, 4], '#7a6149');
+  const roofPBR = createPBRTextureSet('https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02', [3, 3], '#7d3e3e');
 
   return {
-    grass: new THREE.MeshStandardMaterial({ map: grassTex, roughness: 0.95, metalness: 0.02 }),
-    dirt: new THREE.MeshStandardMaterial({ map: dirtTex, roughness: 0.96, metalness: 0.02 }),
-    wood: new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.88, metalness: 0.05 }),
+    grass: new THREE.MeshStandardMaterial({ ...grassPBR, roughness: 0.95, metalness: 0.02, envMapIntensity: 0.7 }),
+    dirt: new THREE.MeshStandardMaterial({ ...dirtPBR, roughness: 0.96, metalness: 0.02, envMapIntensity: 0.58 }),
+    wood: new THREE.MeshStandardMaterial({ ...woodPBR, roughness: 0.88, metalness: 0.05, envMapIntensity: 0.6 }),
     bark: new THREE.MeshStandardMaterial({ color: '#4d3422', roughness: 0.92 }),
-    leaf: new THREE.MeshStandardMaterial({ color: '#4b8f45', roughness: 0.84 }),
+    leaf: new THREE.MeshStandardMaterial({ color: '#4b8f45', roughness: 0.82, envMapIntensity: 0.5 }),
     water: new THREE.MeshPhysicalMaterial({
-      color: '#4d9ad3', roughness: 0.2, metalness: 0.05, transmission: 0.3, transparent: true, opacity: 0.85,
+      color: '#4d9ad3', roughness: 0.18, metalness: 0.05, transmission: 0.38, transparent: true, opacity: 0.9,
+      ior: 1.33, clearcoat: 0.65, clearcoatRoughness: 0.16,
     }),
-    bridge: new THREE.MeshStandardMaterial({ color: '#7a5c41', roughness: 0.9 }),
-    wall: new THREE.MeshStandardMaterial({ color: '#f0e7dc', roughness: 0.88 }),
-    roof: new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.8 }),
-    npc: new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.7 }),
-    player: new THREE.MeshStandardMaterial({ color: '#3b82f6', roughness: 0.65 }),
+    bridge: new THREE.MeshStandardMaterial({ ...woodPBR, roughness: 0.82, metalness: 0.06, envMapIntensity: 0.62 }),
+    wall: new THREE.MeshStandardMaterial({ color: '#f0e7dc', roughness: 0.78, envMapIntensity: 0.68 }),
+    roof: new THREE.MeshStandardMaterial({ ...roofPBR, roughness: 0.74, envMapIntensity: 0.72 }),
+    npc: new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.62 }),
+    player: new THREE.MeshStandardMaterial({ color: '#3b82f6', roughness: 0.55 }),
   };
 }
 
@@ -1326,7 +1337,7 @@ async function ensure3DWorld() {
     ui.game3d.innerHTML = '';
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#9ad2ff');
-    scene.fog = new THREE.Fog('#a5d8ff', 26, 80);
+    scene.fog = new THREE.Fog('#a5d8ff', 26, 95);
 
     const camera = new THREE.PerspectiveCamera(55, 16 / 9, 0.1, 220);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
@@ -1334,13 +1345,14 @@ async function ensure3DWorld() {
     renderer.shadowMap.type = THREE.PCFSoftShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.0;
+    renderer.toneMappingExposure = 1.02;
+    renderer.physicallyCorrectLights = true;
     ui.game3d.appendChild(renderer.domElement);
 
-    const hemi = new THREE.HemisphereLight('#dff4ff', '#445a44', 0.45);
+    const hemi = new THREE.HemisphereLight('#dff4ff', '#445a44', 0.48);
     scene.add(hemi);
 
-    const sun = new THREE.DirectionalLight('#fff4df', 1.65);
+    const sun = new THREE.DirectionalLight('#fff4df', 4.8);
     sun.position.set(25, 42, 12);
     sun.castShadow = true;
     sun.shadow.mapSize.set(2048, 2048);
@@ -1348,17 +1360,44 @@ async function ensure3DWorld() {
     sun.shadow.camera.right = 35;
     sun.shadow.camera.top = 35;
     sun.shadow.camera.bottom = -35;
-    sun.shadow.bias = -0.0004;
+    sun.shadow.bias = -0.00035;
     scene.add(sun);
 
-    const bounce = new THREE.DirectionalLight('#9ec5ff', 0.35);
+    const bounce = new THREE.DirectionalLight('#9ec5ff', 1.0);
     bounce.position.set(-16, 12, -22);
     scene.add(bounce);
+
+    const skyDome = new THREE.Mesh(
+      new THREE.SphereGeometry(120, 24, 16),
+      new THREE.MeshBasicMaterial({ color: '#b9dcff', side: THREE.BackSide }),
+    );
+    scene.add(skyDome);
+
+    const rainGeo = new THREE.BufferGeometry();
+    const rainCount = 900;
+    const rainPos = new Float32Array(rainCount * 3);
+    for (let i = 0; i < rainCount; i += 1) {
+      rainPos[i * 3] = rnd(-34, 34);
+      rainPos[i * 3 + 1] = rnd(2, 24);
+      rainPos[i * 3 + 2] = rnd(-26, 26);
+    }
+    rainGeo.setAttribute('position', new THREE.BufferAttribute(rainPos, 3));
+    const rain = new THREE.Points(rainGeo, new THREE.PointsMaterial({ color: '#b9dcff', size: 0.055, transparent: true, opacity: 0.6 }));
+    rain.visible = false;
+    scene.add(rain);
+
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const envTex = pmrem.fromScene(new THREE.Scene(), 0.04).texture;
+    scene.environment = envTex;
 
     render3d.scene = scene;
     render3d.camera = camera;
     render3d.renderer = renderer;
     render3d.sun = sun;
+    render3d.hemi = hemi;
+    render3d.bounce = bounce;
+    render3d.skyDome = skyDome;
+    render3d.rain = rain;
 
     buildThreeWorld();
     await loadFreeWorldProps();
@@ -1431,9 +1470,36 @@ function renderWorld3D() {
   render3d.camera.lookAt(centerX, 1.3, centerZ);
 
   const daylight = (Math.sin(state.time * 0.0023) + 1) / 2;
-  render3d.sun.intensity = 1.1 + daylight * 0.9;
-  render3d.scene.fog.color.set(state.weather === 'rainy' ? '#97abc0' : '#a5d8ff');
-  render3d.scene.background.set(state.weather === 'rainy' ? '#85a5be' : '#9ad2ff');
+  render3d.sun.intensity = 2.3 + daylight * 2.4;
+  if (render3d.hemi) render3d.hemi.intensity = 0.3 + daylight * 0.45;
+  if (render3d.bounce) render3d.bounce.intensity = 0.5 + daylight * 0.55;
+
+  const rainy = state.weather === 'rainy';
+  render3d.scene.fog.color.set(rainy ? '#8b9caf' : '#a5d8ff');
+  render3d.scene.background.set(rainy ? '#7f97ad' : '#9ad2ff');
+  render3d.scene.fog.near = rainy ? 16 : 26;
+  render3d.scene.fog.far = rainy ? 68 : 95;
+  render3d.renderer.toneMappingExposure = rainy ? 0.9 : 1.06;
+
+  if (render3d.skyDome) {
+    render3d.skyDome.material.color.set(rainy ? '#8ea9c0' : '#b9dcff');
+  }
+
+  if (render3d.rain) {
+    render3d.rain.visible = rainy;
+    if (rainy) {
+      const arr = render3d.rain.geometry.attributes.position.array;
+      for (let i = 0; i < arr.length; i += 3) {
+        arr[i + 1] -= 0.35;
+        if (arr[i + 1] < 0.3) {
+          arr[i + 1] = rnd(18, 24);
+          arr[i] = centerX + rnd(-20, 20);
+          arr[i + 2] = centerZ + rnd(-18, 18);
+        }
+      }
+      render3d.rain.geometry.attributes.position.needsUpdate = true;
+    }
+  }
 
   render3d.renderer.render(render3d.scene, render3d.camera);
 }
