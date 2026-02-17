@@ -1,276 +1,484 @@
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 
-const scoreEl = document.getElementById('score');
-const energyEl = document.getElementById('energy');
-const timeEl = document.getElementById('time');
-const restBtn = document.getElementById('restBtn');
-
-const state = {
-  player: { x: 120, y: 420, size: 16, speed: 2.2 },
-  score: 0,
-  energy: 100,
-  keys: new Set(),
-  collectibles: [],
-  fishes: [],
-  fireflies: [],
-  cycle: 0,
-  msg: '평화로운 숲에 오신 걸 환영해요.',
-  msgTimer: 240,
+const ui = {
+  time: document.getElementById('timeLabel'),
+  weather: document.getElementById('weatherLabel'),
+  energy: document.getElementById('energyLabel'),
+  mood: document.getElementById('moodLabel'),
+  coins: document.getElementById('coinsLabel'),
+  level: document.getElementById('levelLabel'),
+  inventory: document.getElementById('inventory'),
+  quest: document.getElementById('questBox'),
+  hint: document.getElementById('hint'),
+  restBtn: document.getElementById('restBtn'),
 };
 
-const homeArea = { x: 80, y: 360, w: 130, h: 120 };
-const lakeArea = { x: 610, y: 180, w: 250, h: 190 };
+const TILE = 48;
+const MAP_W = 48;
+const MAP_H = 30;
 
-function rand(min, max) {
-  return Math.random() * (max - min) + min;
+const ITEMS = [
+  { key: 'flower', icon: '🌸', label: '꽃', value: 5 },
+  { key: 'shell', icon: '🐚', label: '조개', value: 8 },
+  { key: 'berry', icon: '🫐', label: '열매', value: 6 },
+  { key: 'fish', icon: '🐟', label: '물고기', value: 12 },
+  { key: 'wood', icon: '🪵', label: '나무', value: 4 },
+];
+
+const state = {
+  keys: new Set(),
+  player: { x: 420, y: 420, speed: 2.4, energy: 100, mood: 100, anim: 0 },
+  camera: { x: 0, y: 0 },
+  worldTime: 0,
+  weather: 'sunny',
+  coins: 0,
+  xp: 0,
+  level: 1,
+  hint: '숲의 주민 루나를 찾아 말을 걸어보세요. (E)',
+  hintTimer: 260,
+  inventory: Object.fromEntries(ITEMS.map((i) => [i.key, 0])),
+  objects: [],
+  particles: [],
+  fish: [],
+  npcs: [
+    { id: 'luna', x: 780, y: 690, name: '루나', color: '#f59e0b', pulse: 0 },
+  ],
+  quest: {
+    id: 1,
+    title: '루나의 피크닉 준비',
+    needs: { flower: 6, berry: 4, fish: 2 },
+    reward: 120,
+    complete: false,
+  },
+};
+
+const biomes = Array.from({ length: MAP_H }, (_, gy) =>
+  Array.from({ length: MAP_W }, (_, gx) => {
+    const n = Math.sin(gx * 0.25) + Math.cos(gy * 0.33) + Math.random() * 0.7;
+    if (gx > 28 && gx < 42 && gy > 8 && gy < 21) return 'water';
+    if (n > 1.2) return 'meadow';
+    if (n > 0.4) return 'grass';
+    return 'grove';
+  })
+);
+
+function rnd(min, max) { return Math.random() * (max - min) + min; }
+function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
+function dist(a, b) { return Math.hypot(a.x - b.x, a.y - b.y); }
+
+function worldToScreen(x, y) {
+  return { x: x - state.camera.x, y: y - state.camera.y };
 }
 
-function spawnCollectibles() {
-  state.collectibles = Array.from({ length: 18 }, () => ({
-    x: rand(40, canvas.width - 40),
-    y: rand(40, canvas.height - 40),
-    type: Math.random() > 0.45 ? 'flower' : 'shell',
-    size: Math.random() > 0.6 ? 12 : 10,
-  }));
+function spawnWorldObjects() {
+  const next = [];
+  for (let y = 1; y < MAP_H - 1; y++) {
+    for (let x = 1; x < MAP_W - 1; x++) {
+      const biome = biomes[y][x];
+      if (biome === 'water') continue;
+      const chance = biome === 'meadow' ? 0.13 : biome === 'grass' ? 0.09 : 0.12;
+      if (Math.random() < chance) {
+        const key = biome === 'grove' ? (Math.random() > 0.65 ? 'wood' : 'berry') : (Math.random() > 0.45 ? 'flower' : 'berry');
+        next.push({
+          kind: key,
+          x: x * TILE + rnd(10, TILE - 10),
+          y: y * TILE + rnd(10, TILE - 10),
+          bob: rnd(0, Math.PI * 2),
+        });
+      }
+    }
+  }
+  state.objects = next;
 }
 
 function spawnFish() {
-  state.fishes = Array.from({ length: 7 }, () => ({
-    x: rand(lakeArea.x + 20, lakeArea.x + lakeArea.w - 20),
-    y: rand(lakeArea.y + 20, lakeArea.y + lakeArea.h - 20),
+  state.fish = Array.from({ length: 14 }, () => ({
+    x: rnd(29 * TILE, 41 * TILE),
+    y: rnd(9 * TILE, 20 * TILE),
     dir: Math.random() > 0.5 ? 1 : -1,
-    speed: rand(0.5, 1.3),
+    speed: rnd(0.35, 1.1),
   }));
 }
 
-function spawnFireflies() {
-  state.fireflies = Array.from({ length: 20 }, () => ({
-    x: rand(20, canvas.width - 20),
-    y: rand(30, canvas.height - 30),
-    phase: rand(0, Math.PI * 2),
-  }));
+function setHint(text, t = 160) {
+  state.hint = text;
+  state.hintTimer = t;
 }
 
-function setMessage(text) {
-  state.msg = text;
-  state.msgTimer = 180;
+function addParticle(x, y, text, color = '#fff') {
+  state.particles.push({ x, y, text, color, life: 65 });
 }
 
-function drawBackground(dayFactor) {
-  const grad = ctx.createLinearGradient(0, 0, 0, canvas.height);
-  grad.addColorStop(0, `rgba(${80 + dayFactor * 80}, ${140 + dayFactor * 70}, ${220 - dayFactor * 120}, 1)`);
-  grad.addColorStop(1, `rgba(${60 + dayFactor * 40}, ${170 + dayFactor * 40}, ${110 + dayFactor * 50}, 1)`);
-  ctx.fillStyle = grad;
+function itemMeta(key) {
+  return ITEMS.find((i) => i.key === key);
+}
+
+function drawTile(gx, gy, biome, day, rain) {
+  const sx = gx * TILE - state.camera.x;
+  const sy = gy * TILE - state.camera.y;
+  if (sx < -TILE || sy < -TILE || sx > canvas.width + TILE || sy > canvas.height + TILE) return;
+
+  const tint = day * 25 - rain * 10;
+  if (biome === 'water') {
+    ctx.fillStyle = `rgb(${70 + tint}, ${130 + tint}, ${195 + tint})`;
+  } else if (biome === 'meadow') {
+    ctx.fillStyle = `rgb(${110 + tint}, ${205 + tint}, ${120 + tint})`;
+  } else if (biome === 'grove') {
+    ctx.fillStyle = `rgb(${85 + tint}, ${160 + tint}, ${92 + tint})`;
+  } else {
+    ctx.fillStyle = `rgb(${98 + tint}, ${185 + tint}, ${105 + tint})`;
+  }
+  ctx.fillRect(sx, sy, TILE + 1, TILE + 1);
+
+  if (biome === 'water') {
+    ctx.strokeStyle = 'rgba(255,255,255,0.15)';
+    ctx.beginPath();
+    ctx.arc(sx + TILE * 0.5, sy + TILE * 0.5, 12 + Math.sin(state.worldTime * 0.05 + gx) * 4, 0, Math.PI * 2);
+    ctx.stroke();
+  }
+}
+
+function drawWorld() {
+  const day = (Math.sin(state.worldTime * 0.0025) + 1) * 0.5;
+  const rain = state.weather === 'rainy' ? 1 : 0;
+
+  const sky = ctx.createLinearGradient(0, 0, 0, canvas.height);
+  sky.addColorStop(0, `rgb(${70 + day * 100}, ${120 + day * 80}, ${190 - day * 70})`);
+  sky.addColorStop(1, `rgb(${75 + day * 40}, ${170 + day * 50}, ${120 + day * 40})`);
+  ctx.fillStyle = sky;
   ctx.fillRect(0, 0, canvas.width, canvas.height);
 
-  ctx.fillStyle = 'rgba(236, 253, 245, 0.8)';
-  ctx.fillRect(0, canvas.height - 150, canvas.width, 150);
+  const sx = Math.floor(state.camera.x / TILE);
+  const sy = Math.floor(state.camera.y / TILE);
+  const ex = sx + Math.ceil(canvas.width / TILE) + 2;
+  const ey = sy + Math.ceil(canvas.height / TILE) + 2;
 
-  ctx.fillStyle = '#60a5fa';
-  ctx.beginPath();
-  ctx.roundRect(lakeArea.x, lakeArea.y, lakeArea.w, lakeArea.h, 24);
-  ctx.fill();
+  for (let y = sy; y < ey; y++) {
+    for (let x = sx; x < ex; x++) {
+      if (x < 0 || y < 0 || x >= MAP_W || y >= MAP_H) continue;
+      drawTile(x, y, biomes[y][x], day, rain);
+    }
+  }
 
-  ctx.fillStyle = '#92400e';
-  ctx.fillRect(homeArea.x + 10, homeArea.y + 26, 96, 80);
-  ctx.fillStyle = '#7c2d12';
+  drawCamp();
+}
+
+function drawCamp() {
+  const camp = worldToScreen(390, 500);
+  ctx.fillStyle = '#7c3f11';
+  ctx.fillRect(camp.x, camp.y, 170, 120);
+  ctx.fillStyle = '#5b2e0d';
   ctx.beginPath();
-  ctx.moveTo(homeArea.x - 2, homeArea.y + 30);
-  ctx.lineTo(homeArea.x + 58, homeArea.y - 8);
-  ctx.lineTo(homeArea.x + 118, homeArea.y + 30);
+  ctx.moveTo(camp.x - 8, camp.y + 12);
+  ctx.lineTo(camp.x + 85, camp.y - 56);
+  ctx.lineTo(camp.x + 178, camp.y + 12);
   ctx.closePath();
   ctx.fill();
 
   ctx.fillStyle = '#f59e0b';
   ctx.beginPath();
-  ctx.arc(homeArea.x + 126, homeArea.y + 90, 10, 0, Math.PI * 2);
+  ctx.arc(camp.x + 200, camp.y + 92, 10 + Math.sin(state.worldTime * 0.1) * 2, 0, Math.PI * 2);
   ctx.fill();
 }
 
-function drawCollectible(item) {
-  ctx.save();
-  ctx.translate(item.x, item.y);
+function drawResource(o) {
+  const p = worldToScreen(o.x, o.y + Math.sin(state.worldTime * 0.05 + o.bob) * 2);
+  if (p.x < -30 || p.y < -30 || p.x > canvas.width + 30 || p.y > canvas.height + 30) return;
 
-  if (item.type === 'flower') {
-    ctx.fillStyle = '#f472b6';
-    for (let i = 0; i < 5; i++) {
-      const angle = (Math.PI * 2 * i) / 5;
-      ctx.beginPath();
-      ctx.arc(Math.cos(angle) * 5, Math.sin(angle) * 5, 4, 0, Math.PI * 2);
-      ctx.fill();
-    }
-    ctx.fillStyle = '#fef08a';
+  const meta = itemMeta(o.kind);
+  ctx.fillStyle = 'rgba(0,0,0,0.18)';
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y + 8, 10, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.font = '20px serif';
+  ctx.fillText(meta.icon, p.x - 10, p.y + 6);
+}
+
+function drawFish() {
+  state.fish.forEach((f) => {
+    const p = worldToScreen(f.x, f.y);
+    if (p.x < -30 || p.y < -30 || p.x > canvas.width + 30 || p.y > canvas.height + 30) return;
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.scale(f.dir, 1);
+    ctx.fillStyle = '#fef3c7';
     ctx.beginPath();
-    ctx.arc(0, 0, 3, 0, Math.PI * 2);
+    ctx.ellipse(0, 0, 11, 7, 0, 0, Math.PI * 2);
     ctx.fill();
-  } else {
-    ctx.fillStyle = '#fde68a';
     ctx.beginPath();
-    ctx.ellipse(0, 0, 7, 5, 0.4, 0, Math.PI * 2);
+    ctx.moveTo(-10, 0);
+    ctx.lineTo(-18, -6);
+    ctx.lineTo(-18, 6);
+    ctx.closePath();
     ctx.fill();
-    ctx.strokeStyle = '#d97706';
-    ctx.beginPath();
-    ctx.arc(0, 0, 4, 0.6, 2.6);
-    ctx.stroke();
-  }
-
-  ctx.restore();
-}
-
-function drawFish(fish) {
-  ctx.save();
-  ctx.translate(fish.x, fish.y);
-  ctx.scale(fish.dir, 1);
-  ctx.fillStyle = '#fef9c3';
-  ctx.beginPath();
-  ctx.ellipse(0, 0, 10, 6, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.beginPath();
-  ctx.moveTo(-9, 0);
-  ctx.lineTo(-15, -5);
-  ctx.lineTo(-15, 5);
-  ctx.closePath();
-  ctx.fill();
-  ctx.restore();
-}
-
-function drawPlayer() {
-  const { x, y } = state.player;
-  ctx.fillStyle = '#2563eb';
-  ctx.beginPath();
-  ctx.arc(x, y - 12, 9, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.fillStyle = '#1d4ed8';
-  ctx.fillRect(x - 8, y - 4, 16, 22);
-
-  ctx.fillStyle = '#fef3c7';
-  ctx.beginPath();
-  ctx.arc(x, y - 14, 7, 0, Math.PI * 2);
-  ctx.fill();
-}
-
-function drawUI(dayFactor) {
-  if (dayFactor < 0.4) {
-    state.fireflies.forEach((f) => {
-      const glow = (Math.sin(state.cycle * 0.04 + f.phase) + 1) * 0.5;
-      ctx.fillStyle = `rgba(253, 224, 71, ${0.2 + glow * 0.8})`;
-      ctx.beginPath();
-      ctx.arc(f.x, f.y, 2 + glow * 2, 0, Math.PI * 2);
-      ctx.fill();
-    });
-  }
-
-  if (state.msgTimer > 0) {
-    ctx.fillStyle = 'rgba(0, 0, 0, 0.45)';
-    ctx.fillRect(20, 20, 360, 36);
-    ctx.fillStyle = '#fff';
-    ctx.font = '16px sans-serif';
-    ctx.fillText(state.msg, 32, 44);
-    state.msgTimer -= 1;
-  }
-}
-
-function updatePlayer() {
-  const p = state.player;
-  const speed = state.energy > 0 ? p.speed : 1.2;
-  if (state.keys.has('ArrowUp') || state.keys.has('w')) p.y -= speed;
-  if (state.keys.has('ArrowDown') || state.keys.has('s')) p.y += speed;
-  if (state.keys.has('ArrowLeft') || state.keys.has('a')) p.x -= speed;
-  if (state.keys.has('ArrowRight') || state.keys.has('d')) p.x += speed;
-
-  p.x = Math.max(p.size, Math.min(canvas.width - p.size, p.x));
-  p.y = Math.max(p.size, Math.min(canvas.height - p.size, p.y));
-
-  if (state.keys.size > 0) {
-    state.energy = Math.max(0, state.energy - 0.03);
-  } else {
-    state.energy = Math.min(100, state.energy + 0.02);
-  }
-}
-
-function updateFishes() {
-  state.fishes.forEach((fish) => {
-    fish.x += fish.speed * fish.dir;
-    if (fish.x < lakeArea.x + 15 || fish.x > lakeArea.x + lakeArea.w - 15) {
-      fish.dir *= -1;
-    }
+    ctx.restore();
   });
 }
 
-function tryCollect() {
-  state.collectibles = state.collectibles.filter((item) => {
-    const d = Math.hypot(item.x - state.player.x, item.y - state.player.y);
-    if (d < 18) {
-      state.score += item.type === 'flower' ? 8 : 12;
-      state.energy = Math.min(100, state.energy + 3);
-      setMessage(item.type === 'flower' ? '향긋한 꽃을 모았어요 🌸' : '반짝이는 조개를 주웠어요 🐚');
+function drawNpc(npc) {
+  const p = worldToScreen(npc.x, npc.y);
+  npc.pulse += 0.06;
+  ctx.fillStyle = 'rgba(0,0,0,0.25)';
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y + 16, 12, 5, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = npc.color;
+  ctx.fillRect(p.x - 9, p.y - 8, 18, 24);
+  ctx.fillStyle = '#fde68a';
+  ctx.beginPath();
+  ctx.arc(p.x, p.y - 12, 8, 0, Math.PI * 2);
+  ctx.fill();
+
+  if (dist(state.player, npc) < 90) {
+    ctx.fillStyle = `rgba(255,255,255,${0.5 + Math.sin(npc.pulse) * 0.3})`;
+    ctx.fillRect(p.x - 26, p.y - 44, 52, 20);
+    ctx.fillStyle = '#111827';
+    ctx.font = '12px sans-serif';
+    ctx.fillText('E: 대화', p.x - 18, p.y - 30);
+  }
+}
+
+function drawPlayer() {
+  const p = worldToScreen(state.player.x, state.player.y);
+  state.player.anim += state.keys.size ? 0.24 : 0.08;
+  const bob = Math.sin(state.player.anim) * 2;
+
+  ctx.fillStyle = 'rgba(0,0,0,0.22)';
+  ctx.beginPath();
+  ctx.ellipse(p.x, p.y + 16, 14, 6, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.fillStyle = '#2563eb';
+  ctx.fillRect(p.x - 10, p.y - 6 + bob, 20, 24);
+  ctx.fillStyle = '#ffedd5';
+  ctx.beginPath();
+  ctx.arc(p.x, p.y - 12 + bob, 8, 0, Math.PI * 2);
+  ctx.fill();
+}
+
+function drawParticles() {
+  state.particles = state.particles.filter((p) => p.life > 0);
+  state.particles.forEach((p) => {
+    const s = worldToScreen(p.x, p.y);
+    p.y -= 0.35;
+    p.life -= 1;
+    ctx.fillStyle = p.color.replace('ALPHA', (p.life / 65).toFixed(2));
+    ctx.font = 'bold 14px sans-serif';
+    ctx.fillText(p.text, s.x, s.y);
+  });
+}
+
+function drawWeather() {
+  if (state.weather !== 'rainy') return;
+  ctx.strokeStyle = 'rgba(191, 219, 254, 0.55)';
+  for (let i = 0; i < 140; i++) {
+    const x = (i * 97 + state.worldTime * 3) % (canvas.width + 50);
+    const y = (i * 43 + state.worldTime * 5) % (canvas.height + 50);
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.lineTo(x - 5, y + 11);
+    ctx.stroke();
+  }
+}
+
+function updateCamera() {
+  state.camera.x = clamp(state.player.x - canvas.width / 2, 0, MAP_W * TILE - canvas.width);
+  state.camera.y = clamp(state.player.y - canvas.height / 2, 0, MAP_H * TILE - canvas.height);
+}
+
+function playerMove() {
+  const p = state.player;
+  const running = state.keys.has('Shift');
+  const speed = (running ? 1.45 : 1) * (p.energy > 0 ? p.speed : 1.2);
+
+  let dx = 0;
+  let dy = 0;
+  if (state.keys.has('ArrowUp') || state.keys.has('w')) dy -= speed;
+  if (state.keys.has('ArrowDown') || state.keys.has('s')) dy += speed;
+  if (state.keys.has('ArrowLeft') || state.keys.has('a')) dx -= speed;
+  if (state.keys.has('ArrowRight') || state.keys.has('d')) dx += speed;
+
+  const nx = clamp(p.x + dx, 14, MAP_W * TILE - 14);
+  const ny = clamp(p.y + dy, 14, MAP_H * TILE - 14);
+  const tx = Math.floor(nx / TILE);
+  const ty = Math.floor(ny / TILE);
+  const onWater = biomes[ty]?.[tx] === 'water';
+  if (!onWater) {
+    p.x = nx;
+    p.y = ny;
+  }
+
+  const moving = dx || dy;
+  if (moving) {
+    p.energy = clamp(p.energy - (running ? 0.07 : 0.04), 0, 100);
+    p.mood = clamp(p.mood + 0.012, 0, 100);
+  } else {
+    p.energy = clamp(p.energy + 0.035, 0, 100);
+    p.mood = clamp(p.mood - 0.004, 0, 100);
+  }
+}
+
+function updateFish() {
+  state.fish.forEach((f) => {
+    f.x += f.speed * f.dir;
+    if (f.x < 29 * TILE || f.x > 41 * TILE) f.dir *= -1;
+  });
+}
+
+function collectNearby() {
+  const p = state.player;
+  let gain = 0;
+  state.objects = state.objects.filter((o) => {
+    if (dist(p, o) < 22) {
+      const meta = itemMeta(o.kind);
+      state.inventory[o.kind] += 1;
+      gain += meta.value;
+      addParticle(o.x, o.y, `+1 ${meta.icon}`, 'rgba(255,255,255,ALPHA)');
       return false;
     }
     return true;
   });
 
-  if (state.collectibles.length < 8) {
-    spawnCollectibles();
+  if (gain) {
+    state.xp += gain;
+    setHint(`채집 성공! 경험치 +${gain}`);
+  }
+
+  if (state.objects.length < 80) spawnWorldObjects();
+}
+
+function interact() {
+  const npc = state.npcs[0];
+  if (dist(state.player, npc) < 86) {
+    if (!state.quest.complete) {
+      const needs = state.quest.needs;
+      const done = Object.entries(needs).every(([k, v]) => state.inventory[k] >= v);
+      if (done) {
+        Object.entries(needs).forEach(([k, v]) => { state.inventory[k] -= v; });
+        state.coins += state.quest.reward;
+        state.xp += 80;
+        state.quest.complete = true;
+        setHint(`퀘스트 완료! 코인 +${state.quest.reward}, 경험치 +80 ✨`, 220);
+      } else {
+        setHint('루나: 피크닉 재료를 조금만 더 모아줘! 🌼');
+      }
+    } else {
+      state.coins += 10;
+      state.mood = clamp(state.player.mood + 6, 0, 100);
+      setHint('루나와 담소를 나눴어요. 작은 팁 +10 코인 😊');
+    }
+    return;
+  }
+
+  if (inCamp()) {
+    state.player.energy = clamp(state.player.energy + 16, 0, 100);
+    state.player.mood = clamp(state.player.mood + 10, 0, 100);
+    setHint('캠프 정리를 했어요. 마음이 평온해졌습니다.');
   }
 }
 
 function fishAction() {
-  const { x, y } = state.player;
-  const nearLake = x > lakeArea.x - 30 && x < lakeArea.x + lakeArea.w + 30 && y > lakeArea.y - 30 && y < lakeArea.y + lakeArea.h + 30;
-  if (!nearLake) {
-    setMessage('호수 근처에서 낚시할 수 있어요 🎣');
+  const nearWater = biomes[Math.floor(state.player.y / TILE)]?.[Math.floor((state.player.x + 26) / TILE)] === 'water' ||
+    biomes[Math.floor(state.player.y / TILE)]?.[Math.floor((state.player.x - 26) / TILE)] === 'water';
+
+  if (!nearWater) {
+    setHint('호숫가 근처에서 스페이스를 눌러 낚시하세요.');
     return;
   }
 
   const luck = Math.random();
-  if (luck > 0.5) {
-    const bonus = Math.floor(rand(15, 36));
-    state.score += bonus;
-    setMessage(`월척! 점수 +${bonus} 🎉`);
+  if (luck > 0.45) {
+    state.inventory.fish += 1;
+    const bonus = Math.floor(rnd(9, 20));
+    state.xp += bonus;
+    addParticle(state.player.x, state.player.y - 10, '+1 🐟', 'rgba(191, 219, 254, ALPHA)');
+    setHint(`낚시 성공! 경험치 +${bonus}`);
   } else {
-    state.energy = Math.min(100, state.energy + 8);
-    setMessage('작은 물고기와 함께 마음도 차분해졌어요 🫧');
+    state.player.energy = clamp(state.player.energy - 3, 0, 100);
+    setHint('물고기가 달아났어요. 타이밍을 다시 맞춰봐요!');
   }
 }
 
-function restAtHome() {
-  const { x, y } = state.player;
-  const inHome = x > homeArea.x && x < homeArea.x + homeArea.w && y > homeArea.y && y < homeArea.y + homeArea.h;
-  if (!inHome) {
-    setMessage('집 근처로 가서 쉬어보세요 🛖');
+function inCamp() {
+  const p = state.player;
+  return p.x > 360 && p.x < 580 && p.y > 430 && p.y < 660;
+}
+
+function rest() {
+  if (!inCamp()) {
+    setHint('캠프(집) 근처에서만 휴식할 수 있어요.');
     return;
   }
-
-  state.energy = Math.min(100, state.energy + 25);
-  state.score += 5;
-  setMessage('모닥불 앞에서 휴식! 에너지 회복 +25 🔥');
+  state.player.energy = 100;
+  state.player.mood = clamp(state.player.mood + 18, 0, 100);
+  state.worldTime += 600;
+  setHint('푹 쉬었습니다. 시간이 조금 흘렀어요. 💤', 220);
 }
 
-function updateTimeLabel(dayFactor) {
-  const label = dayFactor > 0.66 ? '아침' : dayFactor > 0.33 ? '노을' : '밤';
-  timeEl.textContent = `시간: ${label}`;
+function updateSystems() {
+  state.worldTime += 1;
+  if (state.worldTime % 2600 === 0) {
+    state.weather = Math.random() > 0.7 ? 'rainy' : 'sunny';
+    setHint(state.weather === 'rainy' ? '비가 내리기 시작했어요 ☔' : '맑게 갰어요 ☀️');
+  }
+
+  const nextLevel = state.level * 120;
+  if (state.xp >= nextLevel) {
+    state.level += 1;
+    state.player.speed += 0.08;
+    state.player.mood = clamp(state.player.mood + 8, 0, 100);
+    setHint(`레벨 업! Lv.${state.level} · 이동 속도 증가`, 220);
+  }
+
+  if (state.hintTimer > 0) state.hintTimer -= 1;
 }
 
-function tick() {
-  state.cycle += 1;
-  const dayFactor = (Math.sin(state.cycle * 0.003) + 1) / 2;
+function updateUI() {
+  const t = (Math.sin(state.worldTime * 0.0025) + 1) * 0.5;
+  const timeLabel = t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
 
-  drawBackground(dayFactor);
-  updatePlayer();
-  updateFishes();
-  tryCollect();
+  ui.time.textContent = `🕒 ${timeLabel}`;
+  ui.weather.textContent = ` ${state.weather === 'sunny' ? '☀️ 맑음' : '🌧️ 비'}`;
+  ui.energy.textContent = `⚡ ${Math.floor(state.player.energy)}`;
+  ui.mood.textContent = `💖 ${Math.floor(state.player.mood)}`;
+  ui.coins.textContent = `🪙 ${state.coins}`;
+  ui.level.textContent = `⭐ ${state.level}`;
+  ui.hint.textContent = state.hintTimer > 0 ? state.hint : '';
 
-  state.collectibles.forEach(drawCollectible);
-  state.fishes.forEach(drawFish);
+  ui.inventory.innerHTML = ITEMS.map((i) => `<div>${i.icon} ${i.label}: <b>${state.inventory[i.key]}</b></div>`).join('');
+
+  const needs = state.quest.needs;
+  ui.quest.innerHTML = state.quest.complete
+    ? `✅ <b>${state.quest.title}</b><br>루나와 계속 대화하면 소소한 보상을 받을 수 있어요.`
+    : `📌 <b>${state.quest.title}</b><br>
+       꽃 ${state.inventory.flower}/${needs.flower},
+       열매 ${state.inventory.berry}/${needs.berry},
+       물고기 ${state.inventory.fish}/${needs.fish}<br>
+       보상: 🪙 ${state.quest.reward}`;
+}
+
+function render() {
+  drawWorld();
+  state.objects.forEach(drawResource);
+  drawFish();
+  state.npcs.forEach(drawNpc);
   drawPlayer();
-  drawUI(dayFactor);
+  drawParticles();
+  drawWeather();
+}
 
-  scoreEl.textContent = `점수: ${Math.floor(state.score)}`;
-  energyEl.textContent = `에너지: ${Math.floor(state.energy)}`;
-  updateTimeLabel(dayFactor);
-
-  requestAnimationFrame(tick);
+function loop() {
+  playerMove();
+  updateFish();
+  collectNearby();
+  updateSystems();
+  updateCamera();
+  updateUI();
+  render();
+  requestAnimationFrame(loop);
 }
 
 window.addEventListener('keydown', (e) => {
@@ -280,7 +488,10 @@ window.addEventListener('keydown', (e) => {
     e.preventDefault();
     return;
   }
-
+  if (key === 'e') {
+    interact();
+    return;
+  }
   state.keys.add(key);
 });
 
@@ -289,9 +500,10 @@ window.addEventListener('keyup', (e) => {
   state.keys.delete(key);
 });
 
-restBtn.addEventListener('click', restAtHome);
+ui.restBtn.addEventListener('click', rest);
 
-spawnCollectibles();
+spawnWorldObjects();
 spawnFish();
-spawnFireflies();
-tick();
+updateCamera();
+updateUI();
+loop();

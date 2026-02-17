@@ -3,30 +3,56 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>모동 힐링 포레스트</title>
+  <title>모동 힐링 포레스트 · 디럭스</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
-  <main class="layout">
-    <section class="panel">
-      <h1>🌿 모동 힐링 포레스트</h1>
-      <p>방향키 또는 WASD로 천천히 산책하고, 꽃과 조개를 모아보세요.</p>
-      <ul>
-        <li>🌸 꽃 / 🐚 조개를 주우면 점수가 올라갑니다.</li>
-        <li>🎣 호수 주변에서 낚시(스페이스)를 하면 랜덤 보상을 얻습니다.</li>
-        <li>🛖 집 근처 모닥불에서 쉬면 체력이 회복됩니다.</li>
-      </ul>
-      <div class="stats">
-        <span id="score">점수: 0</span>
-        <span id="energy">에너지: 100</span>
-        <span id="time">시간: 아침</span>
-      </div>
-      <button id="restBtn">집에서 쉬기</button>
-    </section>
-    <section class="game-wrap">
-      <canvas id="game" width="960" height="540" aria-label="2D 힐링 게임"></canvas>
+  <main class="app">
+    <aside class="hud-panel glass">
+      <h1>🌿 힐링 포레스트: 디럭스</h1>
+      <p class="subtitle">2D 감성 슬로우 라이프 · 산책 · 채집 · 낚시 · 퀘스트</p>
+
+      <section class="hud-section">
+        <h2>상태</h2>
+        <div class="stats-grid">
+          <span id="timeLabel">🕒 아침</span>
+          <span id="weatherLabel">☀️ 맑음</span>
+          <span id="energyLabel">⚡ 100</span>
+          <span id="moodLabel">💖 100</span>
+          <span id="coinsLabel">🪙 0</span>
+          <span id="levelLabel">⭐ 1</span>
+        </div>
+      </section>
+
+      <section class="hud-section">
+        <h2>인벤토리</h2>
+        <div class="inv-grid" id="inventory"></div>
+      </section>
+
+      <section class="hud-section">
+        <h2>오늘의 목표</h2>
+        <div id="questBox" class="quest-box"></div>
+      </section>
+
+      <section class="hud-section controls">
+        <h2>조작</h2>
+        <ul>
+          <li>이동: WASD / 방향키</li>
+          <li>상호작용: <kbd>E</kbd></li>
+          <li>낚시: <kbd>Space</kbd></li>
+          <li>달리기: <kbd>Shift</kbd></li>
+        </ul>
+      </section>
+
+      <button id="restBtn" class="rest-btn">🛖 캠프에서 휴식</button>
+      <p id="hint" class="hint"></p>
+    </aside>
+
+    <section class="world-panel glass">
+      <canvas id="game" width="1280" height="720" aria-label="2D 힐링 게임 월드"></canvas>
     </section>
   </main>
+
   <script src="game.js"></script>
 </body>
 </html>
