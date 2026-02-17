@@ -1,3 +1,10 @@
+import * as THREE from 'three';
+import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
+import { RGBELoader } from 'three/addons/loaders/RGBELoader.js';
+import { EffectComposer } from 'three/addons/postprocessing/EffectComposer.js';
+import { RenderPass } from 'three/addons/postprocessing/RenderPass.js';
+import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js';
+
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
@@ -321,6 +328,10 @@ const render3d = {
   clock: null,
   playerMixer: null,
   npcMixers: [],
+  composer: null,
+  bloomPass: null,
+  usePostFX: false,
+  modelRoot: 'assets/models',
   textureStats: { loaded: 0, failed: 0 },
   modelStats: { loaded: 0, failed: 0 },
 };
@@ -2302,29 +2313,20 @@ async function loadFreeWorldProps() {
     markAssetStats('model', true);
   };
 
-  if (!window.THREE || !window.THREE.GLTFLoader) {
-    addFallbackProp(new THREE.TorusKnotGeometry(0.45, 0.14, 80, 12), new THREE.MeshStandardMaterial({ color: '#7c3aed', roughness: 0.45, metalness: 0.35 }), [-10, 1.1, -6], 0.2, 1.2);
-    addFallbackProp(new THREE.DodecahedronGeometry(0.75, 0), new THREE.MeshStandardMaterial({ color: '#06b6d4', roughness: 0.35, metalness: 0.5 }), [9, 0.95, -8], -0.2, 1.1);
-    addFallbackProp(new THREE.IcosahedronGeometry(0.82, 0), new THREE.MeshStandardMaterial({ color: '#f97316', roughness: 0.4, metalness: 0.3 }), [12, 1.0, 8], 0.4, 1);
-    return;
-  }
+  const fallbackPack = () => {
+    const toon = state.renderStyle === 'toon';
+    addFallbackProp(new THREE.ConeGeometry(0.42, 1.6, 8), toon ? new THREE.MeshToonMaterial({ color: '#5a8f53', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#5a8f53', roughness: 0.9 }), [-10, 1.2, -6], 0.1, 1.2);
+    addFallbackProp(new THREE.CylinderGeometry(0.14, 0.2, 1.0, 8), toon ? new THREE.MeshToonMaterial({ color: '#6d4c41', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#6d4c41', roughness: 0.9 }), [-10, 0.5, -6], 0.1, 1.2);
+    addFallbackProp(new THREE.BoxGeometry(1.2, 0.8, 0.8), toon ? new THREE.MeshToonMaterial({ color: '#f2c4a6', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#f2c4a6', roughness: 0.72 }), [10, 0.45, -7], 0.4, 1.0);
+  };
 
-  const loader = new THREE.GLTFLoader();
   const specs = [
-    {
-      url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/Avocado/glTF-Binary/Avocado.glb',
-      pos: [-10, 0.35, -6], rotY: 0.8, scale: 8,
-    },
-    {
-      url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/WaterBottle/glTF-Binary/WaterBottle.glb',
-      pos: [9, 0.3, -8], rotY: -0.3, scale: 5,
-    },
-    {
-      url: 'https://raw.githubusercontent.com/KhronosGroup/glTF-Sample-Assets/main/Models/BoomBox/glTF-Binary/BoomBox.glb',
-      pos: [12, 0.3, 8], rotY: 0.5, scale: 18,
-    },
+    { url: `${render3d.modelRoot}/tree.glb`, pos: [-10, 0, -6], rotY: 0.4, scale: 1.4 },
+    { url: `${render3d.modelRoot}/prop_house.glb`, pos: [10, 0, -7], rotY: -0.25, scale: 1.2 },
   ];
 
+  const loader = new GLTFLoader();
+  let loadedCount = 0;
   const loadOne = (spec) => new Promise((resolve) => {
     loader.load(spec.url, (gltf) => {
       const model = gltf.scene;
@@ -2340,11 +2342,50 @@ async function loadFreeWorldProps() {
       render3d.world.add(model);
       render3d.props.push(model);
       markAssetStats('model', true);
+      loadedCount += 1;
       resolve();
-    }, undefined, () => { markAssetStats('model', false); resolve(); });
+    }, undefined, () => {
+      markAssetStats('model', false);
+      resolve();
+    });
   });
 
   await Promise.all(specs.map(loadOne));
+  if (loadedCount === 0) fallbackPack();
+}
+
+async function applyEnvironmentMap(scene, renderer) {
+  try {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const hdr = await new RGBELoader().loadAsync('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloppenheim_06_puresky_1k.hdr');
+    const envMap = pmrem.fromEquirectangular(hdr).texture;
+    scene.environment = envMap;
+    hdr.dispose();
+    pmrem.dispose();
+    return true;
+  } catch (err) {
+    const pmrem = new THREE.PMREMGenerator(renderer);
+    const fallbackEnv = pmrem.fromScene(new THREE.Scene(), 0.04).texture;
+    scene.environment = fallbackEnv;
+    pmrem.dispose();
+    return false;
+  }
+}
+
+function setupPostProcessing(renderer, scene, camera) {
+  try {
+    const composer = new EffectComposer(renderer);
+    composer.addPass(new RenderPass(scene, camera));
+    const bloomPass = new UnrealBloomPass(new THREE.Vector2(1280, 720), 0.17, 0.45, 0.88);
+    composer.addPass(bloomPass);
+    render3d.composer = composer;
+    render3d.bloomPass = bloomPass;
+    render3d.usePostFX = true;
+  } catch (err) {
+    render3d.composer = null;
+    render3d.bloomPass = null;
+    render3d.usePostFX = false;
+  }
 }
 
 function createRigCharacter(primary = '#3b82f6', secondary = '#0f172a', scale = 1, mats = null) {
@@ -2692,11 +2733,7 @@ function buildThreeWorld() {
 
 async function ensure3DWorld() {
   if (render3d.ready || render3d.loading) return;
-  if (!window.THREE) {
-    setMsg('Three.js 로드 실패로 2D 모드를 유지합니다.');
-    return;
-  }
-  render3d.loading = true;
+    render3d.loading = true;
   render3d.textureStats = { loaded: 0, failed: 0 };
   render3d.modelStats = { loaded: 0, failed: 0 };
   try {
@@ -2755,9 +2792,7 @@ async function ensure3DWorld() {
     rain.visible = false;
     scene.add(rain);
 
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    const envTex = pmrem.fromScene(new THREE.Scene(), 0.04).texture;
-    scene.environment = envTex;
+    await applyEnvironmentMap(scene, renderer);
 
     render3d.scene = scene;
     render3d.camera = camera;
@@ -2768,6 +2803,7 @@ async function ensure3DWorld() {
     render3d.skyDome = skyDome;
     render3d.rain = rain;
     render3d.clock = new THREE.Clock();
+    setupPostProcessing(renderer, scene, camera);
     render3d.playerMixer = null;
     render3d.npcMixers = [];
 
@@ -2789,6 +2825,7 @@ function resize3DRenderer() {
   const w = Math.max(320, Math.floor(ui.game3d.clientWidth || 1280));
   const h = Math.max(180, Math.floor(ui.game3d.clientHeight || 720));
   render3d.renderer.setSize(w, h, false);
+  if (render3d.composer) render3d.composer.setSize(w, h);
   render3d.camera.aspect = w / h;
   render3d.camera.updateProjectionMatrix();
 }
@@ -2873,6 +2910,11 @@ function renderWorld3D() {
   render3d.scene.fog.near = rainy ? 16 : 26;
   render3d.scene.fog.far = rainy ? 68 : 95;
   render3d.renderer.toneMappingExposure = rainy ? (toon ? 1.02 : 0.96) : (toon ? 1.18 : 1.2);
+  if (render3d.bloomPass) {
+    render3d.bloomPass.strength = rainy ? 0.1 : (toon ? 0.2 : 0.14);
+    render3d.bloomPass.radius = toon ? 0.42 : 0.34;
+    render3d.bloomPass.threshold = rainy ? 0.9 : 0.86;
+  }
 
   if (render3d.skyDome) {
     render3d.skyDome.material.color.set(rainy ? '#8ea9c0' : '#b9dcff');
@@ -2908,7 +2950,8 @@ function renderWorld3D() {
     });
   }
 
-  render3d.renderer.render(render3d.scene, render3d.camera);
+  if (render3d.usePostFX && render3d.composer) render3d.composer.render();
+  else render3d.renderer.render(render3d.scene, render3d.camera);
 }
 
 function syncRenderSurface() {
