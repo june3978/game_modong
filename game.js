@@ -84,6 +84,8 @@ const state = {
   questIndex: 0,
   questDone: false,
   shopStock: { seedpackPrice: 20, furniturePrice: 55, fishPrice: 15 },
+  decorScore: 0,
+  version: 'v0.3',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -94,6 +96,17 @@ function worldToScreen(x, y) { return { x: x - state.camera.x, y: y - state.came
 function setMsg(text, t = 170) { state.msg = text; state.msgTimer = t; }
 function addLog(text) { state.logs.unshift(`[D${state.day}] ${text}`); state.logs = state.logs.slice(0, 7); }
 function getQuest() { return state.quests[state.questIndex] || null; }
+
+function calcDecorScore() {
+  const furniture = state.house.furniture;
+  if (!furniture.length) return 0;
+  const uniqueCells = new Set(furniture.map((f) => `${f.gx},${f.gy}`)).size;
+  const rotationVariety = new Set(furniture.map((f) => f.rot || 0)).size;
+  const base = furniture.length * 8;
+  const layout = uniqueCells * 2;
+  const style = rotationVariety * 5;
+  return base + layout + style + state.house.tier * 10;
+}
 
 function tileAt(x, y) {
   const gx = Math.floor(clamp(x, 0, WORLD_W - 1) / TILE);
@@ -688,6 +701,7 @@ function placeFurniture() {
   state.house.furniture.push({ gx: 2, gy: 2, rot: 0 });
   state.house.editor.selected = state.house.furniture.length - 1;
   state.inv.furniture -= 1;
+  state.decorScore = calcDecorScore();
   setMsg('가구 배치 완료. IJKL/T/Tab으로 편집 가능');
 }
 
@@ -697,6 +711,7 @@ function moveFurniture(dx, dy) {
   if (!f) return;
   f.gx = clamp(f.gx + dx, 0, 8);
   f.gy = clamp(f.gy + dy, 0, 6);
+  state.decorScore = calcDecorScore();
 }
 
 function rotateFurniture() {
@@ -704,6 +719,7 @@ function rotateFurniture() {
   const f = state.house.furniture[state.house.editor.selected] || state.house.furniture[0];
   if (!f) return;
   f.rot = ((f.rot || 0) + 1) % 4;
+  state.decorScore = calcDecorScore();
 }
 
 function cycleFurnitureSelection() {
@@ -759,7 +775,8 @@ function openTownBoard() {
   <div class="shop-item"><span>오늘 이벤트</span><span>${state.dailyEvent}</span></div>
   <div class="shop-item"><span>퀘스트</span><span>${state.questDone ? '완료/진행 전환 대기' : '진행 중'}</span></div>
   <div class="shop-item"><span style="font-weight:600">${questText}</span></div>
-  <div class="shop-item"><span>상점 변동</span><span>매일 가격 변동</span></div>`;
+  <div class="shop-item"><span>상점 변동</span><span>매일 가격 변동</span></div>
+  <div class="shop-item"><span>집 인테리어 점수</span><span>${state.decorScore}</span></div>`;
   openModal('마을 보드', html);
 }
 
@@ -899,6 +916,13 @@ function updateCalendar() {
     state.dailyEvent = EVENTS[state.day % EVENTS.length];
     calcDailyShopStock();
     applyDailyEventEffect();
+    if (state.day % 5 === 0 && state.house.tier > 0) {
+      const bonus = Math.floor(state.decorScore * 0.6);
+      if (bonus > 0) {
+        state.coins += bonus;
+        addLog(`주택 평가 보너스: +${bonus} 코인`);
+      }
+    }
     addLog(`새로운 하루 (날씨: ${state.weather}, 이벤트: ${state.dailyEvent})`);
     saveGame();
   }
@@ -907,7 +931,8 @@ function updateCalendar() {
 function updateUI() {
   const t = (Math.sin(state.time * 0.0023) + 1) / 2;
   const phase = t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
-  ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · 🎉 ${state.dailyEvent} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level}`;
+  state.decorScore = calcDecorScore();
+  ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · 🎉 ${state.dailyEvent} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level} · 🏠 ${state.decorScore} · ${state.version}`;
   ui.inventory.innerHTML = ITEMS.map(([k, e]) => `<div>${e} ${k}: <b>${state.inv[k]}</b></div>`).join('');
 
   const q = getQuest();
