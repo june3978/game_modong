@@ -182,6 +182,7 @@ const state = {
   interactionFlags: {},
   barterOffers: {},
   dialoguePools: {},
+  debugPaths: false,
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -543,6 +544,9 @@ function initNPCs() {
     talk: '',
     talkTimer: 0,
     stuckFrames: 0,
+    stuckTimer: 0,
+    path: null,
+    pathIndex: 0,
     lastProgressDist: 0,
     actionTimer: 0,
     lastMutterAt: 0,
@@ -594,6 +598,7 @@ function drawWorld() {
   drawHouseExterior();
   drawNpcHomes2D();
   drawInteractionPOIs();
+  if (state.debugPaths) drawNpcPaths2D();
 
   const horizon = Math.min(canvas.width, canvas.height) * 0.52;
   const grad = ctx.createRadialGradient(canvas.width / 2, canvas.height / 2, horizon * 0.82, canvas.width / 2, canvas.height / 2, horizon * 1.25);
@@ -620,6 +625,27 @@ function drawNpcHomes2D() {
     ctx.fillStyle = '#334155';
     ctx.fillRect(sx + 22, sy + 20, 12, 22);
   });
+}
+
+function drawNpcPaths2D() {
+  ctx.save();
+  ctx.strokeStyle = 'rgba(37, 99, 235, 0.9)';
+  ctx.lineWidth = 2;
+  state.npcs.forEach((n) => {
+    if (!n.path || n.pathIndex >= n.path.length) return;
+    const start = worldToScreen(n.x, n.y);
+    ctx.beginPath();
+    ctx.moveTo(start.x, start.y);
+    for (let i = n.pathIndex; i < n.path.length; i += 1) {
+      const node = n.path[i];
+      const wx = node.gx * TILE + TILE * 0.5;
+      const wy = node.gy * TILE + TILE * 0.5;
+      const p = worldToScreen(wx, wy);
+      ctx.lineTo(p.x, p.y);
+    }
+    ctx.stroke();
+  });
+  ctx.restore();
 }
 
 function drawInteractionPOIs() {
@@ -1022,6 +1048,91 @@ function pickPoiTarget(npc, poiKey) {
   return null;
 }
 
+
+let navCache = { key: '', grid: null };
+
+function buildNavGrid() {
+  const grid = Array.from({ length: MAP_H }, () => Array.from({ length: MAP_W }, () => false));
+  for (let gy = 0; gy < MAP_H; gy += 1) {
+    for (let gx = 0; gx < MAP_W; gx += 1) {
+      const isWater = biomes[gy]?.[gx] === 'water';
+      const bridgeWalk = state.bridgeBuilt && gy === BRIDGE.y && gx >= BRIDGE.x1 && gx <= BRIDGE.x2;
+      grid[gy][gx] = !isWater || bridgeWalk;
+    }
+  }
+  return grid;
+}
+
+function getNavGrid() {
+  const key = `${state.bridgeBuilt ? 1 : 0}`;
+  if (navCache.key !== key || !navCache.grid) {
+    navCache = { key, grid: buildNavGrid() };
+  }
+  return navCache.grid;
+}
+
+function astar(start, goal, grid) {
+  const keyOf = (gx, gy) => `${gx},${gy}`;
+  const h = (gx, gy) => Math.abs(gx - goal.gx) + Math.abs(gy - goal.gy);
+  const open = [{ gx: start.gx, gy: start.gy, f: h(start.gx, start.gy), g: 0 }];
+  const came = new Map();
+  const gScore = new Map([[keyOf(start.gx, start.gy), 0]]);
+  const closed = new Set();
+
+  while (open.length) {
+    open.sort((a, b) => a.f - b.f);
+    const cur = open.shift();
+    const curKey = keyOf(cur.gx, cur.gy);
+    if (closed.has(curKey)) continue;
+    if (cur.gx === goal.gx && cur.gy === goal.gy) {
+      const path = [{ gx: cur.gx, gy: cur.gy }];
+      let stepKey = curKey;
+      while (came.has(stepKey)) {
+        const prev = came.get(stepKey);
+        path.push({ gx: prev.gx, gy: prev.gy });
+        stepKey = keyOf(prev.gx, prev.gy);
+      }
+      return path.reverse();
+    }
+
+    closed.add(curKey);
+    const neigh = [
+      { gx: wrapAxis(cur.gx + 1, MAP_W), gy: cur.gy },
+      { gx: wrapAxis(cur.gx - 1, MAP_W), gy: cur.gy },
+      { gx: cur.gx, gy: wrapAxis(cur.gy + 1, MAP_H) },
+      { gx: cur.gx, gy: wrapAxis(cur.gy - 1, MAP_H) },
+    ];
+
+    for (const nb of neigh) {
+      if (!grid[nb.gy]?.[nb.gx]) continue;
+      const nk = keyOf(nb.gx, nb.gy);
+      const tentative = (gScore.get(curKey) ?? Infinity) + 1;
+      if (tentative < (gScore.get(nk) ?? Infinity)) {
+        came.set(nk, { gx: cur.gx, gy: cur.gy });
+        gScore.set(nk, tentative);
+        open.push({ gx: nb.gx, gy: nb.gy, g: tentative, f: tentative + h(nb.gx, nb.gy) });
+      }
+    }
+  }
+  return null;
+}
+
+function setNpcPathToTarget(npc) {
+  if (!npc.target) return false;
+  const grid = getNavGrid();
+  const s = tileAt(npc.x, npc.y);
+  const g = tileAt(npc.target.x, npc.target.y);
+  const path = astar({ gx: s.gx, gy: s.gy }, { gx: g.gx, gy: g.gy }, grid);
+  if (!path || path.length === 0) {
+    npc.path = null;
+    npc.pathIndex = 0;
+    return false;
+  }
+  npc.path = path;
+  npc.pathIndex = Math.min(1, path.length - 1);
+  return true;
+}
+
 function markPoiVisit(npc, key) {
   if (npc.poiVisitDay !== state.day) {
     npc.poiVisitDay = state.day;
@@ -1079,13 +1190,20 @@ function chooseNpcTargetByState(npc, stateName) {
 
   const mustVisitPoiSoon = npc.poiVisitsToday < 1 && p > 0.58;
   if (stateName === 'fish') {
-    if (npc.id === 'maru' && Math.random() < 0.55) {
+    if (npc.id === 'maru' && Math.random() < 0.6) {
       const pier = pickPoiTarget(npc, 'pier');
-      if (pier) return { target: pier, poiKey: 'pier' };
+      if (pier && tileAt(pier.x, pier.y).b !== 'water') return { target: pier, poiKey: 'pier' };
     }
-    const wx = rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE);
-    const wy = rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE);
-    return { target: { x: wx, y: wy }, poiKey: 'water' };
+    for (let i = 0; i < 16; i += 1) {
+      const cand = {
+        x: rnd((WATER.x1 + 1) * TILE, (WATER.x2 - 1) * TILE),
+        y: rnd((WATER.y1 + 1) * TILE, (WATER.y2 - 1) * TILE),
+      };
+      if (nearWaterEdge(cand.x, cand.y) && tileAt(cand.x, cand.y).b !== 'water') {
+        return { target: cand, poiKey: 'water' };
+      }
+    }
+    return { target: pickLandTarget(npc, 'wander'), poiKey: 'water' };
   }
 
   if (mustVisitPoiSoon) {
@@ -1134,13 +1252,19 @@ function updateNPCs() {
 
     const needNewTarget = !n.target || dist(n, n.target) < 20;
     if (needNewTarget) {
-      const pick = chooseNpcTargetByState(n, n.state);
+      let pick = chooseNpcTargetByState(n, n.state);
       n.target = pick.target;
       if (pick.poiKey) markPoiVisit(n, pick.poiKey);
+      if (!setNpcPathToTarget(n)) {
+        pick = { target: pickLandTarget(n, 'wander') };
+        n.target = pick.target;
+        setNpcPathToTarget(n);
+      }
       if (pick.mate && n.state === 'social') {
         setNpcTalk(n, `${pick.mate.name} 어디 갔지? 같이 얘기하자!`, 72);
       }
       n.stuckFrames = 0;
+      n.stuckTimer = 0;
 
       if (n.state === 'farm' && Math.random() < 0.35) {
         n.actionTimer = 60 + Math.floor(Math.random() * 60);
@@ -1152,19 +1276,33 @@ function updateNPCs() {
 
     if (n.id !== 'maru' && n.target && tileAt(n.target.x, n.target.y).b === 'water') {
       n.target = pickLandTarget(n, n.state);
+      setNpcPathToTarget(n);
       n.stuckFrames = 0;
+      n.stuckTimer = 0;
     }
 
-    const dx = circularDelta(n.target.x, n.x, WORLD_W);
-    const dy = circularDelta(n.target.y, n.y, WORLD_H);
+    let wx = n.target?.x ?? n.x;
+    let wy = n.target?.y ?? n.y;
+    if (n.path && n.path.length > 0 && n.pathIndex < n.path.length) {
+      const node = n.path[n.pathIndex];
+      wx = node.gx * TILE + TILE * 0.5;
+      wy = node.gy * TILE + TILE * 0.5;
+    }
+
+    const dx = circularDelta(wx, n.x, WORLD_W);
+    const dy = circularDelta(wy, n.y, WORLD_H);
     const d = Math.hypot(dx, dy);
+
+    if (d < 12 && n.path && n.pathIndex < n.path.length - 1) {
+      n.pathIndex += 1;
+    }
 
     if (d > 1) {
       const baseSpd = n.state === 'idle' ? 0.62 : n.state === 'social' ? 1.05 : 1.15;
       const spd = n.actionTimer > 0 ? 0.08 : baseSpd;
-      const nx = n.x + (dx / d) * spd;
-      const ny = n.y + (dy / d) * spd;
-      const walkable = isWalkable(nx, ny) || n.state === 'fish' || nearWaterEdge(nx, ny);
+      const nx = n.x + (dx / Math.max(d, 0.0001)) * spd;
+      const ny = n.y + (dy / Math.max(d, 0.0001)) * spd;
+      const walkable = isWalkable(nx, ny) || (n.state === 'fish' && nearWaterEdge(nx, ny));
 
       if (walkable) {
         n.vx = nx - n.x;
@@ -1175,30 +1313,42 @@ function updateNPCs() {
         n.vx = 0;
         n.vy = 0;
       }
-      n.facing = facingTo(n, n.target);
+      n.facing = facingTo(n, { x: wx, y: wy });
 
       const moved = Math.hypot(n.vx, n.vy);
-      if (d > 26 && moved < 0.05) n.stuckFrames += 1;
-      else n.stuckFrames = 0;
-
-      if (n.stuckFrames > 120) {
-        const repick = chooseNpcTargetByState(n, n.state);
-        n.target = repick.target;
+      if (d > 26 && moved < 0.05) {
+        n.stuckFrames += 1;
+        n.stuckTimer += 1;
+      } else {
         n.stuckFrames = 0;
+        n.stuckTimer = 0;
+      }
+
+      if (n.stuckTimer > 120) {
+        if (!setNpcPathToTarget(n)) {
+          const repick = chooseNpcTargetByState(n, n.state);
+          n.target = repick.target;
+          setNpcPathToTarget(n);
+        }
+        n.stuckFrames = 0;
+        n.stuckTimer = 0;
       }
     } else {
       n.vx = 0;
       n.vy = 0;
       n.stuckFrames = 0;
+      n.stuckTimer = 0;
     }
 
     if (n.id !== 'maru' && tileAt(n.x, n.y).b === 'water') {
       n.x = n.home.x + rnd(-40, 40);
       n.y = n.home.y + rnd(24, 72);
       n.target = pickLandTarget(n, 'idle');
+      setNpcPathToTarget(n);
       n.vx = 0;
       n.vy = 0;
       n.stuckFrames = 0;
+      n.stuckTimer = 0;
       n.talk = '물은 싫어! 뭍으로 돌아왔어.';
       n.talkTimer = 60;
     }
