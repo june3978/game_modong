@@ -56,7 +56,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v0.8: 풀 3D 아트 스타일 + 실내 이동 개선',
+  msg: 'v0.9: 3D 그래픽 아트 패스 업그레이드',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -99,7 +99,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v0.8',
+  version: 'v0.9',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -1139,17 +1139,30 @@ function projectIso(x, y, z, cam) {
   const sin = Math.sin(cam.yaw);
   const rx = tx * cos - tz * sin;
   const rz = tx * sin + tz * cos;
-  const persp = 1 / (1 + Math.max(-280, rz) * 0.00135);
+  const persp = 1 / (1 + Math.max(-300, rz) * 0.0015);
   return {
     x: cam.w * 0.5 + rx * cam.scale * persp,
-    y: cam.h * 0.58 + rz * cam.scale * 0.52 * persp - y * persp,
+    y: cam.h * 0.6 + rz * cam.scale * 0.52 * persp - y * persp,
     depth: rz,
     persp,
   };
 }
 
-function drawIsoTile(ctx3d, cx, cy, h, color, shade = 0.18) {
-  const hw = 21;
+function hash2(x, y) {
+  const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
+  return n - Math.floor(n);
+}
+
+function tint(hex, amount = 0) {
+  const c = hex.replace('#', '');
+  const r = Math.max(0, Math.min(255, parseInt(c.slice(0, 2), 16) + amount));
+  const g = Math.max(0, Math.min(255, parseInt(c.slice(2, 4), 16) + amount));
+  const b = Math.max(0, Math.min(255, parseInt(c.slice(4, 6), 16) + amount));
+  return `rgb(${r},${g},${b})`;
+}
+
+function drawIsoTile(ctx3d, cx, cy, h, color, shade = 0.18, detail = 0) {
+  const hw = 22;
   const hh = 11;
   ctx3d.beginPath();
   ctx3d.moveTo(cx, cy - h - hh);
@@ -1159,6 +1172,14 @@ function drawIsoTile(ctx3d, cx, cy, h, color, shade = 0.18) {
   ctx3d.closePath();
   ctx3d.fillStyle = color;
   ctx3d.fill();
+
+  if (detail > 0.45) {
+    ctx3d.strokeStyle = 'rgba(255,255,255,0.10)';
+    ctx3d.beginPath();
+    ctx3d.moveTo(cx - 8, cy - h - 2);
+    ctx3d.lineTo(cx + 6, cy - h + 4);
+    ctx3d.stroke();
+  }
 
   ctx3d.beginPath();
   ctx3d.moveTo(cx - hw, cy - h);
@@ -1172,25 +1193,26 @@ function drawIsoTile(ctx3d, cx, cy, h, color, shade = 0.18) {
   ctx3d.beginPath();
   ctx3d.moveTo(cx + hw, cy - h);
   ctx3d.lineTo(cx, cy - h + hh);
-  ctx3d.lineTo(cx, cy +hh);
+  ctx3d.lineTo(cx, cy + hh);
   ctx3d.lineTo(cx + hw, cy);
   ctx3d.closePath();
-  ctx3d.fillStyle = 'rgba(255,255,255,0.12)';
+  ctx3d.fillStyle = 'rgba(255,255,255,0.14)';
   ctx3d.fill();
 }
 
 function inRect(x, y, r) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
 
 function pathWeight(x, y) {
-  const centerPath = Math.abs(x - 900) < 95;
-  const crossPath = Math.abs(y - 470) < 90 && x > 620 && x < 1180;
-  return centerPath || crossPath;
+  const vPath = Math.abs(x - 890) < 90;
+  const hPath = Math.abs(y - 468) < 86 && x > 600 && x < 1200;
+  const branch = Math.abs((x - 700) - (y - 500) * 0.45) < 58 && y > 420 && y < 760;
+  return vPath || hPath || branch;
 }
 
 function farmRects3d() {
   return [
-    { x: FARM.x - 72, y: FARM.y - 28, w: FARM.w + 120, h: FARM.h + 40 },
-    { x: FARM.x + 460, y: FARM.y - 16, w: FARM.w + 90, h: FARM.h + 26 },
+    { x: FARM.x - 92, y: FARM.y - 34, w: FARM.w + 150, h: FARM.h + 46 },
+    { x: FARM.x + 460, y: FARM.y - 16, w: FARM.w + 94, h: FARM.h + 34 },
   ];
 }
 
@@ -1202,8 +1224,9 @@ function renderWorld3D() {
   const day = (Math.sin(state.time * 0.0023) + 1) / 2;
 
   const bg = ctx3d.createLinearGradient(0, 0, 0, h);
-  bg.addColorStop(0, `rgb(${118 + day * 40}, ${187 + day * 38}, ${175 + day * 22})`);
-  bg.addColorStop(1, `rgb(${86 + day * 22}, ${155 + day * 28}, ${124 + day * 18})`);
+  bg.addColorStop(0, `rgb(${130 + day * 40}, ${200 + day * 40}, ${190 + day * 24})`);
+  bg.addColorStop(0.65, `rgb(${99 + day * 28}, ${176 + day * 28}, ${140 + day * 20})`);
+  bg.addColorStop(1, `rgb(${82 + day * 22}, ${148 + day * 20}, ${116 + day * 18})`);
   ctx3d.fillStyle = bg;
   ctx3d.fillRect(0, 0, w, h);
 
@@ -1211,7 +1234,7 @@ function renderWorld3D() {
     x: state.player.x,
     z: state.player.y,
     yaw: state.camera3d.yaw,
-    scale: clamp(1.26 - ((state.camera3d.dist - 320) / 980), 0.62, 1.22),
+    scale: clamp(1.34 - ((state.camera3d.dist - 320) / 900), 0.66, 1.26),
     w,
     h,
   };
@@ -1223,11 +1246,12 @@ function renderWorld3D() {
     for (let gx = 0; gx < MAP_W; gx++) {
       const wx = gx * TILE;
       const wy = gy * TILE;
+      if (Math.abs(wx - cam.x) > 960 || Math.abs(wy - cam.z) > 960) continue;
       const b = biomes[gy][gx];
       const p = projectIso(wx, 0, wy, cam);
       const isFarm = farms.some((f) => inRect(wx, wy, f));
       const isPath = pathWeight(wx, wy);
-      drawables.push({ type: 'tile', p, b, isFarm, isPath, wx, wy });
+      drawables.push({ type: 'tile', p, b, isFarm, isPath, wx, wy, noise: hash2(gx, gy) });
     }
   }
 
@@ -1243,37 +1267,39 @@ function renderWorld3D() {
     }
   });
   fenceSegments.forEach((f) => {
-    const p = projectIso(f.x, 18, f.y, cam);
-    drawables.push({ type: 'fence', p });
+    if (Math.abs(f.x - cam.x) > 1200 || Math.abs(f.y - cam.z) > 1200) return;
+    drawables.push({ type: 'fence', p: projectIso(f.x, 18, f.y, cam) });
   });
 
   state.crops.forEach((c) => {
+    if (Math.abs(c.x - cam.x) > 1200 || Math.abs(c.y - cam.z) > 1200) return;
     const p = projectIso(c.x, 18 + c.stage * 6, c.y, cam);
     drawables.push({ type: 'crop', p, stage: c.stage });
   });
 
-  state.objects.slice(0, 180).forEach((o) => {
+  state.objects.slice(0, 220).forEach((o) => {
+    if (Math.abs(o.x - cam.x) > 1100 || Math.abs(o.y - cam.z) > 1100) return;
     const p = projectIso(o.x, 16 + Math.sin(state.time * 0.04 + o.bob) * 4, o.y, cam);
     drawables.push({ type: 'res', p, o });
   });
 
   const bushes = [
-    { x: 560, y: 420 }, { x: 1160, y: 420 }, { x: 560, y: 760 }, { x: 1200, y: 760 },
+    { x: 520, y: 400 }, { x: 1180, y: 420 }, { x: 560, y: 780 }, { x: 1230, y: 760 },
+    { x: 960, y: 330 }, { x: 710, y: 860 },
   ];
   bushes.forEach((b) => drawables.push({ type: 'bush', p: projectIso(b.x, 26, b.y, cam) }));
 
-  state.npcs.forEach((n) => {
-    const p = projectIso(n.x, 30, n.y, cam);
-    drawables.push({ type: 'npc', p, n });
-  });
+  const trees = [
+    { x: 420, y: 320 }, { x: 1380, y: 360 }, { x: 390, y: 930 }, { x: 1450, y: 880 },
+    { x: 1020, y: 240 }, { x: 1280, y: 620 }
+  ];
+  trees.forEach((t) => drawables.push({ type: 'tree', p: projectIso(t.x, 56, t.y, cam) }));
+
+  state.npcs.forEach((n) => drawables.push({ type: 'npc', p: projectIso(n.x, 30, n.y, cam), n }));
   drawables.push({ type: 'player', p: projectIso(state.player.x, 30, state.player.y, cam) });
 
-  if (state.house.tier > 0) {
-    drawables.push({ type: 'house', p: projectIso(HOUSE_PLOT.x + 90, 0, HOUSE_PLOT.y + 65, cam) });
-  }
-  if (state.bridgeBuilt) {
-    drawables.push({ type: 'bridge', p: projectIso((BRIDGE.x1 + BRIDGE.x2) * TILE * 0.5, 0, BRIDGE.y * TILE, cam) });
-  }
+  if (state.house.tier > 0) drawables.push({ type: 'house', p: projectIso(HOUSE_PLOT.x + 90, 0, HOUSE_PLOT.y + 65, cam) });
+  if (state.bridgeBuilt) drawables.push({ type: 'bridge', p: projectIso((BRIDGE.x1 + BRIDGE.x2) * TILE * 0.5, 0, BRIDGE.y * TILE, cam) });
 
   drawables.sort((a, b) => a.p.depth - b.p.depth);
 
@@ -1281,111 +1307,128 @@ function renderWorld3D() {
     if (d.type === 'tile') {
       let col = d.b === 'water' ? '#4f9be7' : '#66bb64';
       let hgt = d.b === 'water' ? 3 : 15;
-      if (d.b === 'grove') col = '#5aa85a';
-      if (d.b === 'meadow') col = '#7acc6d';
+      if (d.b === 'grove') col = '#58a454';
+      if (d.b === 'meadow') col = '#7bcc6f';
       if (d.isPath) { col = '#e3ba80'; hgt = 10; }
       if (d.isFarm) { col = '#8f5c39'; hgt = 9; }
-      drawIsoTile(ctx3d, d.p.x, d.p.y, hgt, col, d.isPath ? 0.12 : 0.18);
-      if (d.isPath && (Math.floor((d.wx + d.wy) / TILE) % 3 === 0)) {
-        ctx3d.fillStyle = 'rgba(255,255,255,0.15)';
+      col = tint(col, Math.floor((d.noise - 0.5) * 10));
+      drawIsoTile(ctx3d, d.p.x, d.p.y, hgt, col, d.isPath ? 0.12 : 0.2, d.noise);
+
+      if (d.b === 'water' && d.noise > 0.75) {
+        ctx3d.strokeStyle = 'rgba(255,255,255,0.2)';
         ctx3d.beginPath();
-        ctx3d.ellipse(d.p.x, d.p.y - 11, 8, 3, 0, 0, Math.PI * 2);
+        ctx3d.moveTo(d.p.x - 6, d.p.y - 8);
+        ctx3d.lineTo(d.p.x + 7, d.p.y - 5);
+        ctx3d.stroke();
+      }
+      if (d.isPath && d.noise > 0.66) {
+        ctx3d.fillStyle = 'rgba(255,255,255,0.2)';
+        ctx3d.beginPath();
+        ctx3d.ellipse(d.p.x, d.p.y - 11, 8, 2.8, 0, 0, Math.PI * 2);
         ctx3d.fill();
       }
       return;
     }
 
     if (d.type === 'fence') {
-      ctx3d.fillStyle = '#d6a157';
-      ctx3d.fillRect(d.p.x - 3, d.p.y - 28, 6, 24);
-      ctx3d.fillStyle = '#c7904c';
-      ctx3d.fillRect(d.p.x - 8, d.p.y - 12, 16, 5);
+      ctx3d.fillStyle = '#d4a15a';
+      ctx3d.fillRect(d.p.x - 3, d.p.y - 30, 6, 25);
+      ctx3d.fillStyle = '#c68f49';
+      ctx3d.fillRect(d.p.x - 9, d.p.y - 12, 18, 5);
       return;
     }
 
     if (d.type === 'crop') {
       const tall = d.stage >= 3;
       ctx3d.strokeStyle = tall ? '#d8c34a' : '#2f9e44';
-      ctx3d.lineWidth = tall ? 2.4 : 2;
+      ctx3d.lineWidth = tall ? 2.3 : 2;
       ctx3d.beginPath();
       ctx3d.moveTo(d.p.x, d.p.y - 6);
-      ctx3d.lineTo(d.p.x, d.p.y - (tall ? 22 : 16));
+      ctx3d.lineTo(d.p.x, d.p.y - (tall ? 24 : 16));
       ctx3d.stroke();
       if (tall) {
         ctx3d.fillStyle = '#ecd367';
-        ctx3d.fillRect(d.p.x - 3, d.p.y - 24, 6, 8);
+        ctx3d.fillRect(d.p.x - 3, d.p.y - 26, 6, 9);
       }
       return;
     }
 
     if (d.type === 'bridge') {
       ctx3d.fillStyle = '#8b5a2b';
-      ctx3d.fillRect(d.p.x - 160 * cam.scale, d.p.y - 18, 320 * cam.scale, 14);
+      ctx3d.fillRect(d.p.x - 165 * cam.scale, d.p.y - 18, 330 * cam.scale, 14);
       ctx3d.fillStyle = '#6d431f';
-      for (let i = -150; i < 150; i += 22) ctx3d.fillRect(d.p.x + i * cam.scale, d.p.y - 18, 2, 14);
+      for (let i = -154; i < 154; i += 21) ctx3d.fillRect(d.p.x + i * cam.scale, d.p.y - 18, 2, 14);
       return;
     }
 
     if (d.type === 'house') {
-      ctx3d.fillStyle = 'rgba(0,0,0,0.15)';
+      ctx3d.fillStyle = 'rgba(0,0,0,0.18)';
       ctx3d.beginPath();
-      ctx3d.ellipse(d.p.x + 20, d.p.y + 6, 58, 20, 0, 0, Math.PI * 2);
+      ctx3d.ellipse(d.p.x + 22, d.p.y + 7, 66, 23, 0, 0, Math.PI * 2);
       ctx3d.fill();
       ctx3d.fillStyle = '#c26a1a';
-      ctx3d.fillRect(d.p.x - 54, d.p.y - 88, 108, 78);
+      ctx3d.fillRect(d.p.x - 56, d.p.y - 90, 112, 80);
       ctx3d.fillStyle = '#8f3e0f';
       ctx3d.beginPath();
-      ctx3d.moveTo(d.p.x - 64, d.p.y - 88);
-      ctx3d.lineTo(d.p.x, d.p.y - 132);
-      ctx3d.lineTo(d.p.x + 64, d.p.y - 88);
+      ctx3d.moveTo(d.p.x - 70, d.p.y - 90);
+      ctx3d.lineTo(d.p.x, d.p.y - 138);
+      ctx3d.lineTo(d.p.x + 70, d.p.y - 90);
       ctx3d.closePath();
       ctx3d.fill();
       ctx3d.fillStyle = '#fde68a';
-      ctx3d.fillRect(d.p.x - 10, d.p.y - 44, 20, 34);
+      ctx3d.fillRect(d.p.x - 10, d.p.y - 46, 20, 36);
+      return;
+    }
+
+    if (d.type === 'tree') {
+      ctx3d.fillStyle = 'rgba(0,0,0,0.2)';
+      ctx3d.beginPath();
+      ctx3d.ellipse(d.p.x, d.p.y + 8, 20, 7, 0, 0, Math.PI * 2);
+      ctx3d.fill();
+      ctx3d.fillStyle = '#7c4a23';
+      ctx3d.fillRect(d.p.x - 4, d.p.y - 30, 8, 26);
+      ctx3d.fillStyle = '#2f9b48';
+      ctx3d.beginPath(); ctx3d.arc(d.p.x, d.p.y - 40, 20, 0, Math.PI * 2); ctx3d.fill();
+      ctx3d.fillStyle = '#3ab055';
+      ctx3d.beginPath(); ctx3d.arc(d.p.x - 8, d.p.y - 46, 10, 0, Math.PI * 2); ctx3d.fill();
       return;
     }
 
     if (d.type === 'bush') {
-      ctx3d.fillStyle = 'rgba(0,0,0,0.12)';
+      ctx3d.fillStyle = 'rgba(0,0,0,0.13)';
       ctx3d.beginPath();
       ctx3d.ellipse(d.p.x, d.p.y + 4, 22, 8, 0, 0, Math.PI * 2);
       ctx3d.fill();
       ctx3d.fillStyle = '#3ea956';
-      ctx3d.beginPath();
-      ctx3d.arc(d.p.x, d.p.y - 16, 18, 0, Math.PI * 2);
-      ctx3d.fill();
+      ctx3d.beginPath(); ctx3d.arc(d.p.x, d.p.y - 16, 18, 0, Math.PI * 2); ctx3d.fill();
       ctx3d.fillStyle = '#52bc6a';
-      ctx3d.beginPath();
-      ctx3d.arc(d.p.x - 6, d.p.y - 21, 8, 0, Math.PI * 2);
-      ctx3d.fill();
+      ctx3d.beginPath(); ctx3d.arc(d.p.x - 6, d.p.y - 21, 8, 0, Math.PI * 2); ctx3d.fill();
       return;
     }
 
     if (d.type === 'res') {
       const col = d.o.type === 'wood' ? '#5b3b1f' : d.o.type === 'flower' ? '#f472b6' : d.o.type === 'berry' ? '#4f46e5' : d.o.type === 'shell' ? '#e5e7eb' : '#fde68a';
       ctx3d.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx3d.beginPath();
-      ctx3d.ellipse(d.p.x, d.p.y - 2, 5, 2, 0, 0, Math.PI * 2);
-      ctx3d.fill();
+      ctx3d.beginPath(); ctx3d.ellipse(d.p.x, d.p.y - 2, 5, 2, 0, 0, Math.PI * 2); ctx3d.fill();
       ctx3d.fillStyle = col;
-      ctx3d.beginPath();
-      ctx3d.arc(d.p.x, d.p.y - 9, 4.5, 0, Math.PI * 2);
-      ctx3d.fill();
+      ctx3d.beginPath(); ctx3d.arc(d.p.x, d.p.y - 9, 4.5, 0, Math.PI * 2); ctx3d.fill();
       return;
     }
 
     const col = d.type === 'player' ? '#3b82f6' : d.n.color;
     ctx3d.fillStyle = 'rgba(0,0,0,0.16)';
-    ctx3d.beginPath();
-    ctx3d.ellipse(d.p.x, d.p.y - 4, 10, 4, 0, 0, Math.PI * 2);
-    ctx3d.fill();
+    ctx3d.beginPath(); ctx3d.ellipse(d.p.x, d.p.y - 4, 10, 4, 0, 0, Math.PI * 2); ctx3d.fill();
     ctx3d.fillStyle = col;
     ctx3d.fillRect(d.p.x - 7, d.p.y - 30, 14, 24);
     ctx3d.fillStyle = '#ffedd5';
-    ctx3d.beginPath();
-    ctx3d.arc(d.p.x, d.p.y - 34, 7, 0, Math.PI * 2);
-    ctx3d.fill();
+    ctx3d.beginPath(); ctx3d.arc(d.p.x, d.p.y - 34, 7, 0, Math.PI * 2); ctx3d.fill();
   });
+
+  const vignette = ctx3d.createRadialGradient(w * 0.5, h * 0.58, h * 0.25, w * 0.5, h * 0.6, h * 0.9);
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(1, 'rgba(0,0,0,0.22)');
+  ctx3d.fillStyle = vignette;
+  ctx3d.fillRect(0, 0, w, h);
 }
 
 function syncRenderSurface() {
