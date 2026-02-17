@@ -56,7 +56,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v0.9: 3D 그래픽 아트 패스 업그레이드',
+  msg: 'v1.0: PBR 조명/그림자 기반 3D 렌더 업그레이드',
   msgTimer: 280,
   logs: ['게임 시작'],
   coins: 110,
@@ -99,7 +99,7 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v0.9',
+  version: 'v1.0',
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -1103,16 +1103,199 @@ function updateCalendar() {
 }
 
 
+function createNoiseTexture(base = '#6fa86a', accent = '#4f7f49', size = 256, scale = 0.2) {
+  const c = document.createElement('canvas');
+  c.width = size;
+  c.height = size;
+  const g = c.getContext('2d');
+  g.fillStyle = base;
+  g.fillRect(0, 0, size, size);
+  for (let i = 0; i < size * size * scale; i += 1) {
+    const x = Math.floor(Math.random() * size);
+    const y = Math.floor(Math.random() * size);
+    const r = Math.floor(Math.random() * 3) + 1;
+    g.fillStyle = Math.random() > 0.5 ? accent : 'rgba(255,255,255,0.08)';
+    g.beginPath();
+    g.arc(x, y, r, 0, Math.PI * 2);
+    g.fill();
+  }
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(18, 18);
+  tex.anisotropy = 8;
+  return tex;
+}
+
+function createWorldMaterials() {
+  const grassTex = createNoiseTexture('#7fae6e', '#5f8d4e', 256, 0.22);
+  const dirtTex = createNoiseTexture('#8f7858', '#6c573f', 256, 0.2);
+  const woodTex = createNoiseTexture('#816447', '#5f452f', 256, 0.16);
+  const roofTex = createNoiseTexture('#7f2d2d', '#5f1d1d', 256, 0.12);
+
+  return {
+    grass: new THREE.MeshStandardMaterial({ map: grassTex, roughness: 0.95, metalness: 0.02 }),
+    dirt: new THREE.MeshStandardMaterial({ map: dirtTex, roughness: 0.96, metalness: 0.02 }),
+    wood: new THREE.MeshStandardMaterial({ map: woodTex, roughness: 0.88, metalness: 0.05 }),
+    bark: new THREE.MeshStandardMaterial({ color: '#4d3422', roughness: 0.92 }),
+    leaf: new THREE.MeshStandardMaterial({ color: '#4b8f45', roughness: 0.84 }),
+    water: new THREE.MeshPhysicalMaterial({
+      color: '#4d9ad3', roughness: 0.2, metalness: 0.05, transmission: 0.3, transparent: true, opacity: 0.85,
+    }),
+    bridge: new THREE.MeshStandardMaterial({ color: '#7a5c41', roughness: 0.9 }),
+    wall: new THREE.MeshStandardMaterial({ color: '#f0e7dc', roughness: 0.88 }),
+    roof: new THREE.MeshStandardMaterial({ map: roofTex, roughness: 0.8 }),
+    npc: new THREE.MeshStandardMaterial({ color: '#f59e0b', roughness: 0.7 }),
+    player: new THREE.MeshStandardMaterial({ color: '#3b82f6', roughness: 0.65 }),
+  };
+}
+
+function createCharacterMesh(material, scale = 1) {
+  const group = new THREE.Group();
+  const body = new THREE.Mesh(new THREE.CapsuleGeometry(0.45 * scale, 1.1 * scale, 6, 12), material);
+  body.castShadow = true;
+  body.position.y = 1.1 * scale;
+  const head = new THREE.Mesh(new THREE.SphereGeometry(0.42 * scale, 18, 18), new THREE.MeshStandardMaterial({ color: '#f6d3b5', roughness: 0.7 }));
+  head.castShadow = true;
+  head.position.y = 2.05 * scale;
+  group.add(body, head);
+  return group;
+}
+
+function buildThreeWorld() {
+  const mats = createWorldMaterials();
+  render3d.mats = mats;
+  render3d.world = new THREE.Group();
+  render3d.scene.add(render3d.world);
+
+  const tileGeo = new THREE.BoxGeometry(1, 0.5, 1);
+  for (let gy = 0; gy < MAP_H; gy += 1) {
+    for (let gx = 0; gx < MAP_W; gx += 1) {
+      const biome = biomes[gy][gx];
+      const material = biome === 'water' ? mats.dirt : mats.grass;
+      const tile = new THREE.Mesh(tileGeo, material);
+      tile.receiveShadow = true;
+      tile.position.set(gx - MAP_W / 2, 0, gy - MAP_H / 2);
+      render3d.world.add(tile);
+    }
+  }
+
+  const pondW = WATER.x2 - WATER.x1 - 1;
+  const pondH = WATER.y2 - WATER.y1 - 1;
+  const water = new THREE.Mesh(new THREE.PlaneGeometry(pondW, pondH), mats.water);
+  water.rotation.x = -Math.PI / 2;
+  water.position.set((WATER.x1 + WATER.x2) / 2 - MAP_W / 2, 0.15, (WATER.y1 + WATER.y2) / 2 - MAP_H / 2);
+  water.receiveShadow = true;
+  render3d.water = water;
+  render3d.world.add(water);
+
+  const bridgeGroup = new THREE.Group();
+  const bridgeLen = BRIDGE.x2 - BRIDGE.x1 + 1;
+  for (let i = 0; i < bridgeLen; i += 1) {
+    const plank = new THREE.Mesh(new THREE.BoxGeometry(0.95, 0.2, 1.1), mats.bridge);
+    plank.position.set(BRIDGE.x1 + i - MAP_W / 2, 0.48, BRIDGE.y - MAP_H / 2);
+    plank.castShadow = true;
+    plank.receiveShadow = true;
+    bridgeGroup.add(plank);
+  }
+  bridgeGroup.visible = state.bridgeBuilt;
+  render3d.bridge = bridgeGroup;
+  render3d.world.add(bridgeGroup);
+
+  for (let i = 0; i < 90; i += 1) {
+    const x = rnd(2, MAP_W - 2) - MAP_W / 2;
+    const z = rnd(2, MAP_H - 2) - MAP_H / 2;
+    if (x > WATER.x1 - MAP_W / 2 && x < WATER.x2 - MAP_W / 2 && z > WATER.y1 - MAP_H / 2 && z < WATER.y2 - MAP_H / 2) continue;
+    const tree = new THREE.Group();
+    const trunk = new THREE.Mesh(new THREE.CylinderGeometry(0.15, 0.2, 1.4, 8), mats.bark);
+    trunk.position.y = 0.9;
+    trunk.castShadow = true;
+    const leaf = new THREE.Mesh(new THREE.SphereGeometry(0.7, 10, 10), mats.leaf);
+    leaf.position.y = 1.9;
+    leaf.castShadow = true;
+    tree.add(trunk, leaf);
+    tree.position.set(x, 0.25, z);
+    render3d.world.add(tree);
+  }
+
+  const house = new THREE.Group();
+  const houseBase = new THREE.Mesh(new THREE.BoxGeometry(3.2, 2.1, 2.6), mats.wall);
+  houseBase.position.y = 1.3;
+  houseBase.castShadow = true;
+  const houseRoof = new THREE.Mesh(new THREE.ConeGeometry(2.4, 1.6, 4), mats.roof);
+  houseRoof.position.y = 3.05;
+  houseRoof.rotation.y = Math.PI * 0.25;
+  houseRoof.castShadow = true;
+  house.add(houseBase, houseRoof);
+  house.position.set(HOUSE_PLOT.x / TILE - MAP_W / 2 + 1.8, 0, HOUSE_PLOT.y / TILE - MAP_H / 2 + 1.2);
+  house.visible = state.house.tier > 0;
+  render3d.house = house;
+  render3d.world.add(house);
+
+  render3d.player = createCharacterMesh(mats.player, 1);
+  render3d.world.add(render3d.player);
+
+  render3d.npcMeshes = state.npcs.map((npc) => {
+    const mat = new THREE.MeshStandardMaterial({ color: npc.color, roughness: 0.72 });
+    const mesh = createCharacterMesh(mat, 0.95);
+    render3d.world.add(mesh);
+    return mesh;
+  });
+
+  render3d.resourceMeshes = state.objects.map((obj) => {
+    const color = obj.type === 'wood' ? '#6b4f3a' : obj.type === 'flower' ? '#f472b6' : obj.type === 'berry' ? '#5b4fd8' : obj.type === 'shell' ? '#e5e7eb' : '#fef08a';
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.22, 10, 10), new THREE.MeshStandardMaterial({ color, roughness: 0.65 }));
+    mesh.castShadow = true;
+    render3d.world.add(mesh);
+    return mesh;
+  });
+}
+
 async function ensure3DWorld() {
   if (render3d.ready || render3d.loading) return;
+  if (!window.THREE) {
+    setMsg('Three.js 로드 실패로 2D 모드를 유지합니다.');
+    return;
+  }
   render3d.loading = true;
   try {
-    render3d.canvas = document.createElement('canvas');
-    render3d.canvas.width = 1280;
-    render3d.canvas.height = 720;
-    render3d.ctx = render3d.canvas.getContext('2d');
     ui.game3d.innerHTML = '';
-    ui.game3d.appendChild(render3d.canvas);
+    const scene = new THREE.Scene();
+    scene.background = new THREE.Color('#9ad2ff');
+    scene.fog = new THREE.Fog('#a5d8ff', 26, 80);
+
+    const camera = new THREE.PerspectiveCamera(55, 16 / 9, 0.1, 220);
+    const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
+    renderer.shadowMap.enabled = true;
+    renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+    renderer.outputColorSpace = THREE.SRGBColorSpace;
+    renderer.toneMapping = THREE.ACESFilmicToneMapping;
+    renderer.toneMappingExposure = 1.0;
+    ui.game3d.appendChild(renderer.domElement);
+
+    const hemi = new THREE.HemisphereLight('#dff4ff', '#445a44', 0.45);
+    scene.add(hemi);
+
+    const sun = new THREE.DirectionalLight('#fff4df', 1.65);
+    sun.position.set(25, 42, 12);
+    sun.castShadow = true;
+    sun.shadow.mapSize.set(2048, 2048);
+    sun.shadow.camera.left = -35;
+    sun.shadow.camera.right = 35;
+    sun.shadow.camera.top = 35;
+    sun.shadow.camera.bottom = -35;
+    sun.shadow.bias = -0.0004;
+    scene.add(sun);
+
+    const bounce = new THREE.DirectionalLight('#9ec5ff', 0.35);
+    bounce.position.set(-16, 12, -22);
+    scene.add(bounce);
+
+    render3d.scene = scene;
+    render3d.camera = camera;
+    render3d.renderer = renderer;
+    render3d.sun = sun;
+
+    buildThreeWorld();
     render3d.ready = true;
     resize3DRenderer();
   } catch (err) {
@@ -1125,310 +1308,68 @@ async function ensure3DWorld() {
 }
 
 function resize3DRenderer() {
-  if (!render3d.ready || !ui.game3d) return;
+  if (!render3d.ready || !render3d.renderer || !render3d.camera) return;
   const w = Math.max(320, Math.floor(ui.game3d.clientWidth || 1280));
   const h = Math.max(180, Math.floor(ui.game3d.clientHeight || 720));
-  render3d.canvas.width = w;
-  render3d.canvas.height = h;
+  render3d.renderer.setSize(w, h, false);
+  render3d.camera.aspect = w / h;
+  render3d.camera.updateProjectionMatrix();
 }
 
-function projectIso(x, y, z, cam) {
-  const tx = x - cam.x;
-  const tz = z - cam.z;
-  const cos = Math.cos(cam.yaw);
-  const sin = Math.sin(cam.yaw);
-  const rx = tx * cos - tz * sin;
-  const rz = tx * sin + tz * cos;
-  const persp = 1 / (1 + Math.max(-300, rz) * 0.0015);
-  return {
-    x: cam.w * 0.5 + rx * cam.scale * persp,
-    y: cam.h * 0.6 + rz * cam.scale * 0.52 * persp - y * persp,
-    depth: rz,
-    persp,
-  };
-}
+function sync3DEntities() {
+  if (!render3d.ready) return;
+  const to3D = (x, y) => ({ x: x / TILE - MAP_W / 2, z: y / TILE - MAP_H / 2 });
 
-function hash2(x, y) {
-  const n = Math.sin(x * 12.9898 + y * 78.233) * 43758.5453;
-  return n - Math.floor(n);
-}
+  const p = to3D(state.player.x, state.player.y);
+  render3d.player.position.set(p.x, 0.25, p.z);
 
-function tint(hex, amount = 0) {
-  const c = hex.replace('#', '');
-  const r = Math.max(0, Math.min(255, parseInt(c.slice(0, 2), 16) + amount));
-  const g = Math.max(0, Math.min(255, parseInt(c.slice(2, 4), 16) + amount));
-  const b = Math.max(0, Math.min(255, parseInt(c.slice(4, 6), 16) + amount));
-  return `rgb(${r},${g},${b})`;
-}
+  state.npcs.forEach((npc, i) => {
+    const mesh = render3d.npcMeshes[i];
+    if (!mesh) return;
+    const n = to3D(npc.x, npc.y);
+    mesh.position.set(n.x, 0.25, n.z);
+  });
 
-function drawIsoTile(ctx3d, cx, cy, h, color, shade = 0.18, detail = 0) {
-  const hw = 22;
-  const hh = 11;
-  ctx3d.beginPath();
-  ctx3d.moveTo(cx, cy - h - hh);
-  ctx3d.lineTo(cx + hw, cy - h);
-  ctx3d.lineTo(cx, cy - h + hh);
-  ctx3d.lineTo(cx - hw, cy - h);
-  ctx3d.closePath();
-  ctx3d.fillStyle = color;
-  ctx3d.fill();
+  state.objects.forEach((obj, i) => {
+    const mesh = render3d.resourceMeshes[i];
+    if (!mesh) return;
+    const o = to3D(obj.x, obj.y);
+    mesh.position.set(o.x, 0.6 + Math.sin(state.time * 0.03 + i) * 0.08, o.z);
+  });
 
-  if (detail > 0.45) {
-    ctx3d.strokeStyle = 'rgba(255,255,255,0.10)';
-    ctx3d.beginPath();
-    ctx3d.moveTo(cx - 8, cy - h - 2);
-    ctx3d.lineTo(cx + 6, cy - h + 4);
-    ctx3d.stroke();
+  render3d.bridge.visible = state.bridgeBuilt;
+  render3d.house.visible = state.house.tier > 0;
+
+  if (render3d.water) {
+    render3d.water.material.roughness = state.weather === 'rainy' ? 0.08 : 0.2;
+    render3d.water.position.y = 0.13 + Math.sin(state.time * 0.02) * 0.03;
   }
-
-  ctx3d.beginPath();
-  ctx3d.moveTo(cx - hw, cy - h);
-  ctx3d.lineTo(cx, cy - h + hh);
-  ctx3d.lineTo(cx, cy + hh);
-  ctx3d.lineTo(cx - hw, cy);
-  ctx3d.closePath();
-  ctx3d.fillStyle = `rgba(0,0,0,${shade})`;
-  ctx3d.fill();
-
-  ctx3d.beginPath();
-  ctx3d.moveTo(cx + hw, cy - h);
-  ctx3d.lineTo(cx, cy - h + hh);
-  ctx3d.lineTo(cx, cy + hh);
-  ctx3d.lineTo(cx + hw, cy);
-  ctx3d.closePath();
-  ctx3d.fillStyle = 'rgba(255,255,255,0.14)';
-  ctx3d.fill();
-}
-
-function inRect(x, y, r) { return x >= r.x && x <= r.x + r.w && y >= r.y && y <= r.y + r.h; }
-
-function pathWeight(x, y) {
-  const vPath = Math.abs(x - 890) < 90;
-  const hPath = Math.abs(y - 468) < 86 && x > 600 && x < 1200;
-  const branch = Math.abs((x - 700) - (y - 500) * 0.45) < 58 && y > 420 && y < 760;
-  return vPath || hPath || branch;
-}
-
-function farmRects3d() {
-  return [
-    { x: FARM.x - 92, y: FARM.y - 34, w: FARM.w + 150, h: FARM.h + 46 },
-    { x: FARM.x + 460, y: FARM.y - 16, w: FARM.w + 94, h: FARM.h + 34 },
-  ];
 }
 
 function renderWorld3D() {
   if (!render3d.ready) return;
-  const ctx3d = render3d.ctx;
-  const w = render3d.canvas.width;
-  const h = render3d.canvas.height;
-  const day = (Math.sin(state.time * 0.0023) + 1) / 2;
+  sync3DEntities();
 
-  const bg = ctx3d.createLinearGradient(0, 0, 0, h);
-  bg.addColorStop(0, `rgb(${130 + day * 40}, ${200 + day * 40}, ${190 + day * 24})`);
-  bg.addColorStop(0.65, `rgb(${99 + day * 28}, ${176 + day * 28}, ${140 + day * 20})`);
-  bg.addColorStop(1, `rgb(${82 + day * 22}, ${148 + day * 20}, ${116 + day * 18})`);
-  ctx3d.fillStyle = bg;
-  ctx3d.fillRect(0, 0, w, h);
+  const centerX = state.player.x / TILE - MAP_W / 2;
+  const centerZ = state.player.y / TILE - MAP_H / 2;
+  const yaw = state.camera3d.yaw;
+  const distNorm = clamp((state.camera3d.dist - 300) / 600, 0, 1);
+  const dist = 14 + distNorm * 12;
+  const h = 8 + distNorm * 6;
 
-  const cam = {
-    x: state.player.x,
-    z: state.player.y,
-    yaw: state.camera3d.yaw,
-    scale: clamp(1.34 - ((state.camera3d.dist - 320) / 900), 0.66, 1.26),
-    w,
+  render3d.camera.position.set(
+    centerX + Math.cos(yaw) * dist,
     h,
-  };
+    centerZ + Math.sin(yaw) * dist,
+  );
+  render3d.camera.lookAt(centerX, 1.3, centerZ);
 
-  const drawables = [];
-  const farms = farmRects3d();
+  const daylight = (Math.sin(state.time * 0.0023) + 1) / 2;
+  render3d.sun.intensity = 1.1 + daylight * 0.9;
+  render3d.scene.fog.color.set(state.weather === 'rainy' ? '#97abc0' : '#a5d8ff');
+  render3d.scene.background.set(state.weather === 'rainy' ? '#85a5be' : '#9ad2ff');
 
-  for (let gy = 0; gy < MAP_H; gy++) {
-    for (let gx = 0; gx < MAP_W; gx++) {
-      const wx = gx * TILE;
-      const wy = gy * TILE;
-      if (Math.abs(wx - cam.x) > 960 || Math.abs(wy - cam.z) > 960) continue;
-      const b = biomes[gy][gx];
-      const p = projectIso(wx, 0, wy, cam);
-      const isFarm = farms.some((f) => inRect(wx, wy, f));
-      const isPath = pathWeight(wx, wy);
-      drawables.push({ type: 'tile', p, b, isFarm, isPath, wx, wy, noise: hash2(gx, gy) });
-    }
-  }
-
-  const fenceSegments = [];
-  farms.forEach((f) => {
-    for (let x = f.x; x <= f.x + f.w; x += 28) {
-      fenceSegments.push({ x, y: f.y });
-      fenceSegments.push({ x, y: f.y + f.h });
-    }
-    for (let y = f.y; y <= f.y + f.h; y += 28) {
-      fenceSegments.push({ x: f.x, y });
-      fenceSegments.push({ x: f.x + f.w, y });
-    }
-  });
-  fenceSegments.forEach((f) => {
-    if (Math.abs(f.x - cam.x) > 1200 || Math.abs(f.y - cam.z) > 1200) return;
-    drawables.push({ type: 'fence', p: projectIso(f.x, 18, f.y, cam) });
-  });
-
-  state.crops.forEach((c) => {
-    if (Math.abs(c.x - cam.x) > 1200 || Math.abs(c.y - cam.z) > 1200) return;
-    const p = projectIso(c.x, 18 + c.stage * 6, c.y, cam);
-    drawables.push({ type: 'crop', p, stage: c.stage });
-  });
-
-  state.objects.slice(0, 220).forEach((o) => {
-    if (Math.abs(o.x - cam.x) > 1100 || Math.abs(o.y - cam.z) > 1100) return;
-    const p = projectIso(o.x, 16 + Math.sin(state.time * 0.04 + o.bob) * 4, o.y, cam);
-    drawables.push({ type: 'res', p, o });
-  });
-
-  const bushes = [
-    { x: 520, y: 400 }, { x: 1180, y: 420 }, { x: 560, y: 780 }, { x: 1230, y: 760 },
-    { x: 960, y: 330 }, { x: 710, y: 860 },
-  ];
-  bushes.forEach((b) => drawables.push({ type: 'bush', p: projectIso(b.x, 26, b.y, cam) }));
-
-  const trees = [
-    { x: 420, y: 320 }, { x: 1380, y: 360 }, { x: 390, y: 930 }, { x: 1450, y: 880 },
-    { x: 1020, y: 240 }, { x: 1280, y: 620 }
-  ];
-  trees.forEach((t) => drawables.push({ type: 'tree', p: projectIso(t.x, 56, t.y, cam) }));
-
-  state.npcs.forEach((n) => drawables.push({ type: 'npc', p: projectIso(n.x, 30, n.y, cam), n }));
-  drawables.push({ type: 'player', p: projectIso(state.player.x, 30, state.player.y, cam) });
-
-  if (state.house.tier > 0) drawables.push({ type: 'house', p: projectIso(HOUSE_PLOT.x + 90, 0, HOUSE_PLOT.y + 65, cam) });
-  if (state.bridgeBuilt) drawables.push({ type: 'bridge', p: projectIso((BRIDGE.x1 + BRIDGE.x2) * TILE * 0.5, 0, BRIDGE.y * TILE, cam) });
-
-  drawables.sort((a, b) => a.p.depth - b.p.depth);
-
-  drawables.forEach((d) => {
-    if (d.type === 'tile') {
-      let col = d.b === 'water' ? '#4f9be7' : '#66bb64';
-      let hgt = d.b === 'water' ? 3 : 15;
-      if (d.b === 'grove') col = '#58a454';
-      if (d.b === 'meadow') col = '#7bcc6f';
-      if (d.isPath) { col = '#e3ba80'; hgt = 10; }
-      if (d.isFarm) { col = '#8f5c39'; hgt = 9; }
-      col = tint(col, Math.floor((d.noise - 0.5) * 10));
-      drawIsoTile(ctx3d, d.p.x, d.p.y, hgt, col, d.isPath ? 0.12 : 0.2, d.noise);
-
-      if (d.b === 'water' && d.noise > 0.75) {
-        ctx3d.strokeStyle = 'rgba(255,255,255,0.2)';
-        ctx3d.beginPath();
-        ctx3d.moveTo(d.p.x - 6, d.p.y - 8);
-        ctx3d.lineTo(d.p.x + 7, d.p.y - 5);
-        ctx3d.stroke();
-      }
-      if (d.isPath && d.noise > 0.66) {
-        ctx3d.fillStyle = 'rgba(255,255,255,0.2)';
-        ctx3d.beginPath();
-        ctx3d.ellipse(d.p.x, d.p.y - 11, 8, 2.8, 0, 0, Math.PI * 2);
-        ctx3d.fill();
-      }
-      return;
-    }
-
-    if (d.type === 'fence') {
-      ctx3d.fillStyle = '#d4a15a';
-      ctx3d.fillRect(d.p.x - 3, d.p.y - 30, 6, 25);
-      ctx3d.fillStyle = '#c68f49';
-      ctx3d.fillRect(d.p.x - 9, d.p.y - 12, 18, 5);
-      return;
-    }
-
-    if (d.type === 'crop') {
-      const tall = d.stage >= 3;
-      ctx3d.strokeStyle = tall ? '#d8c34a' : '#2f9e44';
-      ctx3d.lineWidth = tall ? 2.3 : 2;
-      ctx3d.beginPath();
-      ctx3d.moveTo(d.p.x, d.p.y - 6);
-      ctx3d.lineTo(d.p.x, d.p.y - (tall ? 24 : 16));
-      ctx3d.stroke();
-      if (tall) {
-        ctx3d.fillStyle = '#ecd367';
-        ctx3d.fillRect(d.p.x - 3, d.p.y - 26, 6, 9);
-      }
-      return;
-    }
-
-    if (d.type === 'bridge') {
-      ctx3d.fillStyle = '#8b5a2b';
-      ctx3d.fillRect(d.p.x - 165 * cam.scale, d.p.y - 18, 330 * cam.scale, 14);
-      ctx3d.fillStyle = '#6d431f';
-      for (let i = -154; i < 154; i += 21) ctx3d.fillRect(d.p.x + i * cam.scale, d.p.y - 18, 2, 14);
-      return;
-    }
-
-    if (d.type === 'house') {
-      ctx3d.fillStyle = 'rgba(0,0,0,0.18)';
-      ctx3d.beginPath();
-      ctx3d.ellipse(d.p.x + 22, d.p.y + 7, 66, 23, 0, 0, Math.PI * 2);
-      ctx3d.fill();
-      ctx3d.fillStyle = '#c26a1a';
-      ctx3d.fillRect(d.p.x - 56, d.p.y - 90, 112, 80);
-      ctx3d.fillStyle = '#8f3e0f';
-      ctx3d.beginPath();
-      ctx3d.moveTo(d.p.x - 70, d.p.y - 90);
-      ctx3d.lineTo(d.p.x, d.p.y - 138);
-      ctx3d.lineTo(d.p.x + 70, d.p.y - 90);
-      ctx3d.closePath();
-      ctx3d.fill();
-      ctx3d.fillStyle = '#fde68a';
-      ctx3d.fillRect(d.p.x - 10, d.p.y - 46, 20, 36);
-      return;
-    }
-
-    if (d.type === 'tree') {
-      ctx3d.fillStyle = 'rgba(0,0,0,0.2)';
-      ctx3d.beginPath();
-      ctx3d.ellipse(d.p.x, d.p.y + 8, 20, 7, 0, 0, Math.PI * 2);
-      ctx3d.fill();
-      ctx3d.fillStyle = '#7c4a23';
-      ctx3d.fillRect(d.p.x - 4, d.p.y - 30, 8, 26);
-      ctx3d.fillStyle = '#2f9b48';
-      ctx3d.beginPath(); ctx3d.arc(d.p.x, d.p.y - 40, 20, 0, Math.PI * 2); ctx3d.fill();
-      ctx3d.fillStyle = '#3ab055';
-      ctx3d.beginPath(); ctx3d.arc(d.p.x - 8, d.p.y - 46, 10, 0, Math.PI * 2); ctx3d.fill();
-      return;
-    }
-
-    if (d.type === 'bush') {
-      ctx3d.fillStyle = 'rgba(0,0,0,0.13)';
-      ctx3d.beginPath();
-      ctx3d.ellipse(d.p.x, d.p.y + 4, 22, 8, 0, 0, Math.PI * 2);
-      ctx3d.fill();
-      ctx3d.fillStyle = '#3ea956';
-      ctx3d.beginPath(); ctx3d.arc(d.p.x, d.p.y - 16, 18, 0, Math.PI * 2); ctx3d.fill();
-      ctx3d.fillStyle = '#52bc6a';
-      ctx3d.beginPath(); ctx3d.arc(d.p.x - 6, d.p.y - 21, 8, 0, Math.PI * 2); ctx3d.fill();
-      return;
-    }
-
-    if (d.type === 'res') {
-      const col = d.o.type === 'wood' ? '#5b3b1f' : d.o.type === 'flower' ? '#f472b6' : d.o.type === 'berry' ? '#4f46e5' : d.o.type === 'shell' ? '#e5e7eb' : '#fde68a';
-      ctx3d.fillStyle = 'rgba(0,0,0,0.12)';
-      ctx3d.beginPath(); ctx3d.ellipse(d.p.x, d.p.y - 2, 5, 2, 0, 0, Math.PI * 2); ctx3d.fill();
-      ctx3d.fillStyle = col;
-      ctx3d.beginPath(); ctx3d.arc(d.p.x, d.p.y - 9, 4.5, 0, Math.PI * 2); ctx3d.fill();
-      return;
-    }
-
-    const col = d.type === 'player' ? '#3b82f6' : d.n.color;
-    ctx3d.fillStyle = 'rgba(0,0,0,0.16)';
-    ctx3d.beginPath(); ctx3d.ellipse(d.p.x, d.p.y - 4, 10, 4, 0, 0, Math.PI * 2); ctx3d.fill();
-    ctx3d.fillStyle = col;
-    ctx3d.fillRect(d.p.x - 7, d.p.y - 30, 14, 24);
-    ctx3d.fillStyle = '#ffedd5';
-    ctx3d.beginPath(); ctx3d.arc(d.p.x, d.p.y - 34, 7, 0, Math.PI * 2); ctx3d.fill();
-  });
-
-  const vignette = ctx3d.createRadialGradient(w * 0.5, h * 0.58, h * 0.25, w * 0.5, h * 0.6, h * 0.9);
-  vignette.addColorStop(0, 'rgba(0,0,0,0)');
-  vignette.addColorStop(1, 'rgba(0,0,0,0.22)');
-  ctx3d.fillStyle = vignette;
-  ctx3d.fillRect(0, 0, w, h);
+  render3d.renderer.render(render3d.scene, render3d.camera);
 }
 
 function syncRenderSurface() {
