@@ -123,6 +123,14 @@ const NPC_POI_POINTS = {
   pier: PIER,
 };
 
+
+const NPC_ROUTINES = {
+  morning: { stateWeight: { idle: 0.34, wander: 0.32, farm: 0.2, social: 0.14 }, poiWeight: { house: 0.44, fountain: 0.22, farm: 0.2, lookout: 0.14 } },
+  noon: { stateWeight: { wander: 0.28, farm: 0.36, social: 0.2, fish: 0.16 }, poiWeight: { farm: 0.38, fountain: 0.16, shop: 0.16, pier: 0.18, lookout: 0.12 } },
+  evening: { stateWeight: { social: 0.36, wander: 0.26, idle: 0.14, fish: 0.24 }, poiWeight: { campfire: 0.32, fountain: 0.22, pier: 0.22, house: 0.14, museum: 0.1 } },
+  night: { stateWeight: { idle: 0.48, social: 0.2, wander: 0.14, fish: 0.18 }, poiWeight: { house: 0.56, campfire: 0.18, lookout: 0.14, pier: 0.12 } },
+};
+
 const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   Array.from({ length: MAP_W }, (_, gx) => {
     if (gx > WATER.x1 && gx < WATER.x2 && gy > WATER.y1 && gy < WATER.y2) return 'water';
@@ -334,6 +342,9 @@ const render3d = {
   modelRoot: 'assets/models',
   textureStats: { loaded: 0, failed: 0 },
   modelStats: { loaded: 0, failed: 0 },
+  debugGroup: null,
+  fxGroup: null,
+  fxParticles: [],
 };
 
 function setMsg(text, t = 170) { state.msg = text; state.msgTimer = t; }
@@ -569,6 +580,10 @@ function initNPCs() {
     poiVisitsToday: 0,
     visitedPoiToday: {},
     traits: NPC_TRAITS[h.id] || NPC_TRAITS.nari,
+    routineSlot: null,
+    gesture: 'idle',
+    gestureTimer: 0,
+    lookYaw: 0,
   }));
 
   state.npcs.forEach((n) => {
@@ -657,6 +672,15 @@ function drawNpcPaths2D() {
       ctx.lineTo(p.x, p.y);
     }
     ctx.stroke();
+    if (n.target) {
+      const tp = worldToScreen(n.target.x, n.target.y);
+      ctx.fillStyle = 'rgba(14,165,233,0.92)';
+      ctx.beginPath();
+      ctx.arc(tp.x, tp.y, 4, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = '#0f172a';
+      ctx.fillText(`${n.name}:${n.state}`, tp.x + 6, tp.y - 6);
+    }
   });
   ctx.restore();
 }
@@ -995,36 +1019,58 @@ function getDayProgress() {
   return (state.time % 2600) / 2600;
 }
 
-function npcScheduledState(npc) {
+function getDaySlot() {
   const p = getDayProgress();
+  if (p < 0.25) return 'morning';
+  if (p < 0.5) return 'noon';
+  if (p < 0.75) return 'evening';
+  return 'night';
+}
+
+function pickWeighted(weightMap, fallback = null) {
+  const entries = Object.entries(weightMap || {});
+  if (!entries.length) return fallback;
+  const sum = entries.reduce((acc, [, v]) => acc + Math.max(0, v), 0);
+  if (sum <= 0) return fallback || entries[0][0];
+  let r = Math.random() * sum;
+  for (const [k, v] of entries) {
+    r -= Math.max(0, v);
+    if (r <= 0) return k;
+  }
+  return entries[entries.length - 1][0];
+}
+
+function npcScheduledState(npc) {
   const rainy = state.weather === 'rainy';
+  const slot = getDaySlot();
+  const routine = NPC_ROUTINES[slot] || NPC_ROUTINES.noon;
+  const trait = npc.traits || {};
 
-  if (npc.id === 'maru') {
-    if (rainy && Math.random() < 0.75) return 'fish';
-    if (p < 0.24) return 'idle';
-    if (p < 0.66) return 'fish';
-    if (p < 0.84) return 'wander';
-    return 'social';
+  if (npc.routineSlot !== slot) {
+    npc.routineSlot = slot;
+    npc.target = null;
   }
 
-  if (npc.id === 'bomi') {
-    if (p < 0.22) return 'idle';
-    if (p < 0.62) return 'farm';
-    if (p < 0.82) return 'wander';
-    return 'social';
+  const stateWeight = { ...routine.stateWeight };
+  if (trait.poi?.includes('farm')) stateWeight.farm = (stateWeight.farm || 0) + 0.14;
+  if (trait.poi?.includes('pier') || trait.poi?.includes('water')) stateWeight.fish = (stateWeight.fish || 0) + 0.18;
+  if (trait.poi?.includes('fountain')) stateWeight.social = (stateWeight.social || 0) + 0.12;
+
+  if (npc.id === 'maru') stateWeight.fish = (stateWeight.fish || 0) + 0.22;
+  if (npc.id === 'bomi' && slot === 'noon') stateWeight.farm = (stateWeight.farm || 0) + 0.3;
+  if (npc.id === 'bomi' && slot === 'evening') stateWeight.social = (stateWeight.social || 0) + 0.22;
+  if (npc.id === 'luna' && slot !== 'night') stateWeight.social = (stateWeight.social || 0) + 0.16;
+
+  if (rainy) {
+    const homeBias = clamp((trait.rainyHomeBias || 0.35) * 0.9, 0, 0.95);
+    stateWeight.idle = (stateWeight.idle || 0.1) + homeBias;
+    stateWeight.wander = Math.max(0.05, (stateWeight.wander || 0.1) - homeBias * 0.35);
+    if (npc.id !== 'maru') stateWeight.fish = Math.max(0, (stateWeight.fish || 0) - homeBias * 0.5);
   }
 
-  if (npc.id === 'luna') {
-    if (rainy && Math.random() < npc.traits.rainyHomeBias) return 'idle';
-    if (p < 0.28) return 'idle';
-    if (p < 0.55) return 'wander';
-    return 'social';
-  }
-
-  if (p < 0.26) return 'idle';
-  if (p < 0.5) return 'wander';
-  if (p < 0.74) return 'farm';
-  return 'social';
+  const picked = pickWeighted(stateWeight, npc.state || 'wander');
+  if (npc.id !== 'maru' && picked === 'fish') return 'wander';
+  return picked;
 }
 
 function pushRecentTalk(npc, line) {
@@ -1201,7 +1247,22 @@ function chooseNpcTargetByState(npc, stateName) {
     npc.visitedPoiToday = {};
   }
 
+  const slot = getDaySlot();
+  const routine = NPC_ROUTINES[slot] || NPC_ROUTINES.noon;
   const mustVisitPoiSoon = npc.poiVisitsToday < 1 && p > 0.58;
+
+  const poiWeight = { ...(routine.poiWeight || {}) };
+  (npc.traits?.poi || []).forEach((k, idx) => {
+    if (!poiWeight[k]) poiWeight[k] = 0;
+    poiWeight[k] += 0.22 - idx * 0.03;
+  });
+  if (rainy) {
+    const rb = (npc.traits?.rainyHomeBias || 0.3) * 1.2;
+    poiWeight.house = (poiWeight.house || 0) + rb;
+    poiWeight.campfire = (poiWeight.campfire || 0) + rb * 0.24;
+    poiWeight.pier = Math.max(0, (poiWeight.pier || 0) - rb * 0.45);
+    poiWeight.lookout = Math.max(0, (poiWeight.lookout || 0) - rb * 0.2);
+  }
   if (stateName === 'fish') {
     if (npc.id === 'maru' && Math.random() < 0.6) {
       const pier = pickPoiTarget(npc, 'pier');
@@ -1217,6 +1278,16 @@ function chooseNpcTargetByState(npc, stateName) {
       }
     }
     return { target: pickLandTarget(npc, 'wander'), poiKey: 'water' };
+  }
+
+  if (!mustVisitPoiSoon && Math.random() < 0.72) {
+    const poiKey = pickWeighted(poiWeight, null);
+    if (poiKey) {
+      const pickedPoi = pickPoiTarget(npc, poiKey);
+      if (pickedPoi && (poiKey === 'pier' || poiKey === 'water' || tileAt(pickedPoi.x, pickedPoi.y).b !== 'water')) {
+        return { target: pickedPoi, poiKey };
+      }
+    }
   }
 
   if (mustVisitPoiSoon) {
@@ -1255,13 +1326,49 @@ function chooseNpcTargetByState(npc, stateName) {
   return { target: pickLandTarget(npc, stateName) };
 }
 
+
+function chooseGestureForNpc(npc) {
+  if (npc.state === 'fish' && (dist(npc, PIER) < 110 || nearWaterEdge(npc.x, npc.y))) return 'fishPose';
+  if (npc.state === 'social' && dist(npc, FOUNTAIN) < 120) return Math.random() < 0.5 ? 'clap' : 'wave';
+  if (npc.state === 'social' && dist(npc, CAMPFIRE) < 120) return Math.random() < 0.45 ? 'sit' : 'wave';
+  if (npc.state === 'idle') {
+    const pool = ['nod', 'stretch', 'wave'];
+    if (dist(npc, CAMPFIRE) < 110) pool.push('sit');
+    return pool[Math.floor(Math.random() * pool.length)];
+  }
+  return 'idle';
+}
+
+function spawnNpcReactionEffect(npc, kind = 'heart') {
+  if (!render3d.ready || !render3d.world) return;
+  if (!render3d.fxGroup) {
+    render3d.fxGroup = new THREE.Group();
+    render3d.world.add(render3d.fxGroup);
+  }
+  const color = kind === 'heart' ? '#fb7185' : '#fef08a';
+  const mat = new THREE.MeshBasicMaterial({ color, transparent: true, opacity: 0.95 });
+  for (let i = 0; i < 7; i += 1) {
+    const mesh = new THREE.Mesh(new THREE.SphereGeometry(0.06 + Math.random() * 0.03, 8, 8), mat.clone());
+    mesh.position.set(npc.x / TILE - MAP_W / 2 + rnd(-0.2, 0.2), 2.0 + rnd(0, 0.35), npc.y / TILE - MAP_H / 2 + rnd(-0.2, 0.2));
+    render3d.fxGroup.add(mesh);
+    render3d.fxParticles.push({ mesh, vy: 0.012 + Math.random() * 0.01, vx: rnd(-0.004, 0.004), vz: rnd(-0.004, 0.004), life: 60 });
+  }
+}
+
 function updateNPCs() {
   state.npcs.forEach((n) => {
     if (n.pause) return;
+    const prevState = n.state;
     n.state = npcScheduledState(n);
     if (n.id !== 'maru' && n.state === 'fish') n.state = 'wander';
     if (n.talkTimer > 0) n.talkTimer -= 1;
     if (n.actionTimer > 0) n.actionTimer -= 1;
+    if (n.gestureTimer > 0) n.gestureTimer -= 1;
+
+    if (prevState !== n.state || n.gestureTimer <= 0) {
+      n.gesture = chooseGestureForNpc(n);
+      n.gestureTimer = 45 + Math.floor(Math.random() * 80);
+    }
 
     const needNewTarget = !n.target || dist(n, n.target) < 20;
     if (needNewTarget) {
@@ -1279,12 +1386,9 @@ function updateNPCs() {
       n.stuckFrames = 0;
       n.stuckTimer = 0;
 
-      if (n.state === 'farm' && Math.random() < 0.35) {
-        n.actionTimer = 60 + Math.floor(Math.random() * 60);
-      }
-      if (n.state === 'idle' && Math.random() < 0.25) {
-        n.actionTimer = 24 + Math.floor(Math.random() * 40);
-      }
+      if (n.state === 'farm' && Math.random() < 0.45) n.actionTimer = 60 + Math.floor(Math.random() * 70);
+      if (n.state === 'idle' && Math.random() < 0.35) n.actionTimer = 24 + Math.floor(Math.random() * 50);
+      if (n.state === 'fish' && Math.random() < 0.4) n.actionTimer = 35 + Math.floor(Math.random() * 50);
     }
 
     if (n.id !== 'maru' && n.target && tileAt(n.target.x, n.target.y).b === 'water') {
@@ -1306,9 +1410,7 @@ function updateNPCs() {
     const dy = circularDelta(wy, n.y, WORLD_H);
     const d = Math.hypot(dx, dy);
 
-    if (d < 12 && n.path && n.pathIndex < n.path.length - 1) {
-      n.pathIndex += 1;
-    }
+    if (d < 12 && n.path && n.pathIndex < n.path.length - 1) n.pathIndex += 1;
 
     if (d > 1) {
       const baseSpd = n.state === 'idle' ? 0.62 : n.state === 'social' ? 1.05 : 1.15;
@@ -1343,6 +1445,8 @@ function updateNPCs() {
           n.target = repick.target;
           setNpcPathToTarget(n);
         }
+        n.gesture = 'stretch';
+        n.gestureTimer = 50;
         n.stuckFrames = 0;
         n.stuckTimer = 0;
       }
@@ -1364,6 +1468,8 @@ function updateNPCs() {
       n.stuckTimer = 0;
       n.talk = '물은 싫어! 뭍으로 돌아왔어.';
       n.talkTimer = 60;
+      n.gesture = 'wave';
+      n.gestureTimer = 50;
     }
 
     const rel = state.relationships[n.id] || 0;
@@ -1546,6 +1652,7 @@ function handleDialogueChoice(idx) {
       state.coins += q.reward;
       state.questDone = true;
       n.talk = '완벽해! 고마워!';
+      spawnNpcReactionEffect(n, 'spark');
       state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 8, 0, 100);
       setMsg(`퀘스트 완료! 코인 +${q.reward}`);
       addLog(`퀘스트 완료: ${q.title}`);
@@ -1573,11 +1680,13 @@ function handleDialogueChoice(idx) {
       if (barter.ok) {
         n.talk = getDialogueLine(n);
         setMsg(barter.msg);
+        spawnNpcReactionEffect(n, 'heart');
       } else if (state.inv.berry > 0) {
         state.inv.berry -= 1;
         n.mood = clamp(n.mood + 10, 0, 100);
         state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 4, 0, 100);
         n.talk = '열매 선물 고마워!';
+        spawnNpcReactionEffect(n, 'heart');
         setMsg('선물 성공! 호감도 상승');
       } else {
         const tip = req ? `오늘 요청: ${req.item} ${req.need} / 교환 재료도 확인해보세요.` : barter.msg;
@@ -2861,9 +2970,23 @@ function sync3DEntities() {
     if (!mesh) return;
     const n = to3D(npc.x, npc.y);
     mesh.position.set(n.x, 0.25, n.z);
-    mesh.rotation.y = facingToYaw(npc.facing || 'down');
+    const nearPlayer = dist(state.player, npc) < 100;
+    const facingYaw = facingToYaw(npc.facing || 'down');
+    const lookYaw = Math.atan2(circularDelta(state.player.x, npc.x, WORLD_W), circularDelta(state.player.y, npc.y, WORLD_H));
+    const targetYaw = nearPlayer ? lookYaw : facingYaw;
+    npc.lookYaw = (npc.lookYaw ?? targetYaw) + (targetYaw - (npc.lookYaw ?? targetYaw)) * 0.14;
+    mesh.rotation.y = npc.lookYaw;
     const npcMoving = Math.abs(npc.vx || 0) + Math.abs(npc.vy || 0) > 0.05;
     animateRigCharacter(mesh, state.time * 0.016 + i * 0.7, npcMoving);
+    const parts = mesh.userData?.parts;
+    if (parts && !npcMoving) {
+      if (npc.gesture === 'nod') parts.torso.rotation.x = Math.sin(state.time * 0.08 + i) * 0.09;
+      else if (npc.gesture === 'stretch') { parts.armL.rotation.x = -0.9; parts.armR.rotation.x = -0.9; }
+      else if (npc.gesture === 'wave') parts.armR.rotation.x = -0.3 + Math.sin(state.time * 0.2 + i) * 0.8;
+      else if (npc.gesture === 'fishPose') { parts.armL.rotation.x = -0.6; parts.armR.rotation.x = -1.0; }
+      else if (npc.gesture === 'clap') { parts.armL.rotation.z = 0.25; parts.armR.rotation.z = -0.25; }
+      else if (npc.gesture === 'sit') { parts.legL.rotation.x = 1.1; parts.legR.rotation.x = 1.1; }
+    }
   });
 
   state.objects.forEach((obj, i) => {
@@ -2967,6 +3090,55 @@ function renderWorld3D() {
     });
   }
 
+
+  if (render3d.fxParticles?.length) {
+    render3d.fxParticles = render3d.fxParticles.filter((p) => {
+      p.mesh.position.y += p.vy;
+      p.mesh.position.x += p.vx;
+      p.mesh.position.z += p.vz;
+      p.life -= 1;
+      p.mesh.material.opacity = Math.max(0, p.life / 60);
+      if (p.life <= 0) {
+        render3d.fxGroup?.remove(p.mesh);
+        p.mesh.geometry.dispose();
+        p.mesh.material.dispose();
+        return false;
+      }
+      return true;
+    });
+  }
+
+  if (state.debugPaths && render3d.world) {
+    if (!render3d.debugGroup) {
+      render3d.debugGroup = new THREE.Group();
+      render3d.world.add(render3d.debugGroup);
+    }
+    render3d.debugGroup.visible = true;
+    while (render3d.debugGroup.children.length) {
+      const c = render3d.debugGroup.children.pop();
+      c.geometry?.dispose?.();
+      c.material?.dispose?.();
+      render3d.debugGroup.remove(c);
+    }
+    state.npcs.forEach((n) => {
+      if (!n.path || n.pathIndex >= n.path.length) return;
+      const pts = [new THREE.Vector3(n.x / TILE - MAP_W / 2, 0.2, n.y / TILE - MAP_H / 2)];
+      for (let i = n.pathIndex; i < n.path.length; i += 1) {
+        const node = n.path[i];
+        pts.push(new THREE.Vector3(node.gx + 0.5 - MAP_W / 2, 0.2, node.gy + 0.5 - MAP_H / 2));
+      }
+      const line = new THREE.Line(new THREE.BufferGeometry().setFromPoints(pts), new THREE.LineBasicMaterial({ color: 0x38bdf8 }));
+      render3d.debugGroup.add(line);
+      if (n.target) {
+        const marker = new THREE.Mesh(new THREE.SphereGeometry(0.08, 8, 8), new THREE.MeshBasicMaterial({ color: 0x22d3ee }));
+        marker.position.set(n.target.x / TILE - MAP_W / 2, 0.3, n.target.y / TILE - MAP_H / 2);
+        render3d.debugGroup.add(marker);
+      }
+    });
+  } else if (render3d.debugGroup) {
+    render3d.debugGroup.visible = false;
+  }
+
   if (render3d.usePostFX && render3d.composer) render3d.composer.render();
   else render3d.renderer.render(render3d.scene, render3d.camera);
 }
@@ -3037,6 +3209,10 @@ function updateUI() {
   }
 
   ui.message.textContent = state.prompt || (state.msgTimer > 0 ? state.msg : '');
+  if (state.debugPaths) {
+    const dbg = state.npcs.map((n) => `${n.name}:${n.state}`).join(' · ');
+    ui.message.textContent = `${ui.message.textContent ? `${ui.message.textContent} | ` : ''}DBG ${dbg}`;
+  }
 
   if (state.dialogue) {
     ui.dialogueUi.classList.remove('hidden');
@@ -3143,6 +3319,7 @@ window.addEventListener('keydown', (e) => {
 
   if (key === ' ') { e.preventDefault(); fishingInput(); return; }
   if (key === 'm') { openWorldMap(); return; }
+  if (key === 'p') { state.debugPaths = !state.debugPaths; setMsg(`NPC 디버그 ${state.debugPaths ? 'ON' : 'OFF'}`); return; }
   if (key === 'e') { interact(); return; }
   if (key === 'f') { placeFurniture(); return; }
   if (key === 'r') { handleFarmAction(); return; }
