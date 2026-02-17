@@ -75,7 +75,7 @@ const state = {
   season: 0,
   weather: 'sunny',
   dailyEvent: EVENTS[0],
-  msg: 'v2.1: 둥근 무한 월드 + 지도/주민 구역 확장',
+  msg: 'v2.2: 대화 100+ 바리에이션 + 물물교환 시스템',
   msgTimer: 280,
   prompt: '',
   logs: ['게임 시작'],
@@ -119,9 +119,11 @@ const state = {
   decorScore: 0,
   renderMode: '2d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
-  version: 'v2.1',
+  version: 'v2.2',
   buffs: { fish: 0, bug: 0, harvest: 0, discount: 0 },
   interactionFlags: {},
+  barterOffers: {},
+  dialoguePools: {},
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
@@ -163,6 +165,84 @@ function wrappedPointNear(ref, pt) {
     x: ref.x + circularDelta(pt.x, ref.x, WORLD_W),
     y: ref.y + circularDelta(pt.y, ref.y, WORLD_H),
   };
+}
+
+
+
+function buildDialoguePool(name, traits = []) {
+  const moods = ['반짝이는', '포근한', '고요한', '싱그러운', '은은한', '설레는'];
+  const places = ['광장', '해안', '연못', '숲길', '농장', '전망대'];
+  const actions = ['산책하고', '낚시하고', '꽃을 돌보고', '장작을 모으고', '별을 보고', '차를 마시고'];
+  const endings = ['기분이 좋아졌어.', '하루가 꽉 찬 느낌이야.', '오늘은 행운이 따를 것 같아.', '마을이 더 사랑스러워 보여.', '네가 있어서 든든해.', '조금 더 용기가 생겼어.'];
+  const topics = ['집 꾸미기', '새 이웃 이야기', '시장 소식', '박물관 전시', '계절 이벤트', '비밀 스팟'];
+  const pool = [];
+
+  for (const mood of moods) {
+    for (const place of places) {
+      for (const action of actions) {
+        const end = endings[(pool.length + action.length + place.length) % endings.length];
+        const topic = topics[(pool.length + name.length) % topics.length];
+        const trait = traits[pool.length % Math.max(1, traits.length)] || '따뜻한';
+        pool.push(`${name}: ${mood} ${place}에서 ${action} 보니까 ${end} (${trait} 취향 / ${topic})`);
+      }
+    }
+  }
+  // 6*6*6 = 216 lines
+  return pool;
+}
+
+function initDialoguePools() {
+  const traitMap = {
+    luna: ['음악', '꽃', '산책', '디자인'],
+    bomi: ['농사', '수집', '요리', '정원'],
+    maru: ['낚시', '연못', '캠핑', '파도'],
+    nari: ['책', '박물관', '사진', '공예'],
+    toto: ['장난감', '시장', '요리', '모험'],
+    pipi: ['날씨', '해안', '패션', '잡화'],
+  };
+  state.dialoguePools = {};
+  state.npcs.forEach((n) => {
+    state.dialoguePools[n.id] = buildDialoguePool(n.name, traitMap[n.id] || ['일상']);
+  });
+}
+
+function getDialogueLine(npc) {
+  const pool = state.dialoguePools[npc.id] || [];
+  if (!pool.length) return `${npc.name}: 무슨 이야기 할까?`;
+  const idx = (state.day * 17 + Math.floor(state.time / 40) + npc.name.length * 13 + Math.floor(Math.random() * 11)) % pool.length;
+  return pool[idx];
+}
+
+function rollDailyBarterOffers() {
+  const recipes = [
+    { give: 'wood', giveAmt: 3, take: 'seed', takeAmt: 2, mood: 3 },
+    { give: 'flower', giveAmt: 4, take: 'furniture', takeAmt: 1, mood: 4 },
+    { give: 'shell', giveAmt: 3, take: 'berry', takeAmt: 3, mood: 3 },
+    { give: 'fish', giveAmt: 2, take: 'wood', takeAmt: 5, mood: 5 },
+    { give: 'bug', giveAmt: 2, take: 'flower', takeAmt: 4, mood: 4 },
+    { give: 'berry', giveAmt: 4, take: 'seed', takeAmt: 3, mood: 2 },
+  ];
+  const ids = (state.npcs || []).map((n) => n.id);
+  if (!ids.length) return;
+  state.barterOffers = {};
+  ids.forEach((id, idx) => {
+    const r = recipes[(state.day + idx * 3 + state.season) % recipes.length];
+    state.barterOffers[id] = { ...r };
+  });
+}
+
+function tryNpcBarter(npc) {
+  const offer = state.barterOffers[npc.id];
+  if (!offer) return { ok: false, msg: '오늘 교환 제안이 없어요.' };
+  if ((state.inv[offer.give] || 0) < offer.giveAmt) {
+    return { ok: false, msg: `${offer.give} ${offer.giveAmt}개가 필요해요.` };
+  }
+  state.inv[offer.give] -= offer.giveAmt;
+  state.inv[offer.take] = (state.inv[offer.take] || 0) + offer.takeAmt;
+  state.relationships[npc.id] = clamp((state.relationships[npc.id] || 0) + offer.mood, 0, 100);
+  state.xp += 7;
+  addLog(`${npc.name}와 물물교환: ${offer.give} -${offer.giveAmt}, ${offer.take} +${offer.takeAmt}`);
+  return { ok: true, msg: `${npc.name}와 교환 완료! ${offer.take} +${offer.takeAmt}` };
 }
 
 const render3d = {
@@ -934,7 +1014,7 @@ function handleDialogueChoice(idx) {
     } else {
       n.mood = clamp(n.mood + 4, 0, 100);
       state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 2, 0, 100);
-      n.talk = '오늘도 평화롭다 😊';
+      n.talk = getDialogueLine(n);
       state.coins += 5;
       setMsg(`${n.name}와 담소. 코인 +5`);
     }
@@ -950,15 +1030,21 @@ function handleDialogueChoice(idx) {
       n.talk = `고마워! 오늘 부탁 해결!`;
       setMsg(`${n.name} 요청 완료! +${req.reward} 코인`);
       addLog(`${n.name} 일일 요청 완료 (${req.item} ${req.need})`);
-    } else if (state.inv.berry > 0) {
-      state.inv.berry -= 1;
-      n.mood = clamp(n.mood + 10, 0, 100);
-      state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 4, 0, 100);
-      n.talk = '열매 선물 고마워!';
-      setMsg('선물 성공! 호감도 상승');
     } else {
-      const tip = req ? `오늘 요청: ${req.item} ${req.need}` : '열매가 없어요.';
-      setMsg(tip);
+      const barter = tryNpcBarter(n);
+      if (barter.ok) {
+        n.talk = getDialogueLine(n);
+        setMsg(barter.msg);
+      } else if (state.inv.berry > 0) {
+        state.inv.berry -= 1;
+        n.mood = clamp(n.mood + 10, 0, 100);
+        state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 4, 0, 100);
+        n.talk = '열매 선물 고마워!';
+        setMsg('선물 성공! 호감도 상승');
+      } else {
+        const tip = req ? `오늘 요청: ${req.item} ${req.need} / 교환 재료도 확인해보세요.` : barter.msg;
+        setMsg(tip);
+      }
     }
   }
   closeDialogue();
@@ -1032,8 +1118,8 @@ function interact() {
     n.pause = true;
     state.player.facing = facingTo(state.player, n);
     n.facing = facingTo(n, state.player);
-    n.talk = `${n.name}: 무슨 이야기 할까?`;
-    state.dialogue = { npc: n, a: '잡담/퀘스트 전달', b: '열매 선물하기' };
+    n.talk = getDialogueLine(n);
+    state.dialogue = { npc: n, a: '잡담/퀘스트 전달', b: '요청/물물교환/선물' };
     return;
   }
 
@@ -1136,6 +1222,10 @@ function openTownBoard() {
   const requests = Object.entries(state.residentRequests)
     .map(([id, r]) => `${id}: ${r.item} ${r.need} (${r.doneDay === state.day ? '완료' : '미완'})`)
     .join(' / ');
+  const barters = Object.entries(state.barterOffers)
+    .slice(0, 3)
+    .map(([id, b]) => `${id} ${b.give}x${b.giveAmt}→${b.take}x${b.takeAmt}`)
+    .join(' / ');
 
   const html = `
   <div class="shop-item"><span>시즌</span><span>${SEASONS[state.season]}</span></div>
@@ -1147,7 +1237,8 @@ function openTownBoard() {
   <div class="shop-item"><span style="font-weight:600">${questText}</span></div>
   <div class="shop-item"><span>상점 변동</span><span>매일 가격 변동</span></div>
   <div class="shop-item"><span>집 인테리어 점수</span><span>${state.decorScore}</span></div>
-  <div class="shop-item"><span>주민 일일요청</span><span>${requests}</span></div>`;
+  <div class="shop-item"><span>주민 일일요청</span><span>${requests}</span></div>
+  <div class="shop-item"><span>오늘의 물물교환</span><span>${barters || 'NPC와 대화해 확인'}</span></div>`;
   openModal('마을 보드', html);
 }
 
@@ -1464,6 +1555,7 @@ function updateCalendar() {
     state.interactionFlags = {};
     calcDailyShopStock();
     rollResidentRequests();
+    rollDailyBarterOffers();
     applyDailyEventEffect();
     if (state.day % 5 === 0 && state.house.tier > 0) {
       const bonus = Math.floor(state.decorScore * 0.6);
@@ -2222,7 +2314,7 @@ function updateUI() {
 
   ui.message.textContent = state.prompt || (state.msgTimer > 0 ? state.msg : '');
 
-  if (state.dialogue && state.renderMode === '3d') {
+  if (state.dialogue) {
     ui.dialogueUi.classList.remove('hidden');
     ui.dialogueUi.innerHTML = `
       <div class="name">💬 ${state.dialogue.npc.name}</div>
@@ -2286,7 +2378,7 @@ async function toggleRenderMode() {
 window.addEventListener('keydown', (e) => {
   const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
 
-  if (state.dialogue && state.renderMode === '3d') {
+  if (state.dialogue) {
     if (key === '1') return handleDialogueChoice(1);
     if (key === '2') return handleDialogueChoice(2);
     if (key === 'escape') return closeDialogue();
@@ -2349,6 +2441,8 @@ rollResidentRequests();
 spawnResources();
 spawnFish();
 initNPCs();
+initDialoguePools();
+rollDailyBarterOffers();
 ui.btnRender.textContent = '🧊 3D뷰';
 syncRenderSurface();
 window.addEventListener('resize', resize3DRenderer);
