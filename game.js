@@ -141,13 +141,20 @@ const NPC_ROUTINES = {
 };
 
 const NPC_APPEARANCE = {
-  luna: { baseModelId: 'kenney_female_a', palette: ['#f7b7d0', '#7c3aed'], accessoryFlags: ['hat', 'headset'], bodyType: 'slim', heightScale: 1.02 },
-  bomi: { baseModelId: 'kenney_farmer', palette: ['#9fe1a8', '#256d5a'], accessoryFlags: ['backpack'], bodyType: 'normal', heightScale: 0.98 },
-  maru: { baseModelId: 'kenney_fisher', palette: ['#f6c38d', '#1d4ed8'], accessoryFlags: ['glasses', 'headset'], bodyType: 'stocky', heightScale: 1.06 },
-  nari: { baseModelId: 'kenney_scout', palette: ['#d7c1ff', '#7f1d1d'], accessoryFlags: ['hat'], bodyType: 'slim', heightScale: 0.96 },
-  toto: { baseModelId: 'kenney_worker', palette: ['#b6e1ff', '#0f766e'], accessoryFlags: ['backpack', 'glasses'], bodyType: 'stocky', heightScale: 1.04 },
-  pipi: { baseModelId: 'kenney_artist', palette: ['#ffd6a5', '#be185d'], accessoryFlags: ['headset'], bodyType: 'normal', heightScale: 1.0 },
+  luna: { baseModelId: 'kenney_female_a', palette: ['#f8b5cf', '#6d28d9'], accessoryFlags: ['hat', 'glasses', 'scarf'], bodyType: 'slim', heightScale: 1.03, headScale: 1.14, torsoScale: [0.92, 1.02, 0.92], limbScale: 0.96 },
+  bomi: { baseModelId: 'kenney_farmer', palette: ['#8fd3a8', '#14532d'], accessoryFlags: ['backpack', 'hat', 'scarf'], bodyType: 'normal', heightScale: 0.95, headScale: 0.94, torsoScale: [1.05, 1.0, 1.02], limbScale: 1.04 },
+  maru: { baseModelId: 'kenney_fisher', palette: ['#f6c38d', '#1d4ed8'], accessoryFlags: ['headset', 'glasses', 'backpack'], bodyType: 'stocky', heightScale: 1.08, headScale: 1.02, torsoScale: [1.14, 1.0, 1.12], limbScale: 1.08 },
+  nari: { baseModelId: 'kenney_scout', palette: ['#d7c1ff', '#7f1d1d'], accessoryFlags: ['hat', 'scarf', 'glasses'], bodyType: 'slim', heightScale: 0.93, headScale: 1.18, torsoScale: [0.9, 1.04, 0.9], limbScale: 0.92 },
+  toto: { baseModelId: 'kenney_worker', palette: ['#8ecae6', '#0f766e'], accessoryFlags: ['backpack', 'glasses', 'hat'], bodyType: 'stocky', heightScale: 1.05, headScale: 0.9, torsoScale: [1.16, 1.0, 1.1], limbScale: 1.1 },
+  pipi: { baseModelId: 'kenney_artist', palette: ['#ffb4a2', '#be185d'], accessoryFlags: ['headset', 'scarf', 'hat'], bodyType: 'normal', heightScale: 0.99, headScale: 1.2, torsoScale: [0.96, 1.02, 0.96], limbScale: 0.95 },
 };
+
+const NPC_STYLE_PALETTES = [
+  ['#f8b5cf', '#6d28d9'], ['#8fd3a8', '#14532d'], ['#f6c38d', '#1d4ed8'],
+  ['#d7c1ff', '#7f1d1d'], ['#8ecae6', '#0f766e'], ['#ffb4a2', '#be185d'],
+  ['#f5d777', '#7c2d12'], ['#bde0fe', '#334155'], ['#c7f9cc', '#386641'],
+];
+const NPC_ACCESSORY_POOL = ['hat', 'glasses', 'headset', 'backpack', 'scarf'];
 
 const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   Array.from({ length: MAP_W }, (_, gx) => {
@@ -392,6 +399,44 @@ function refreshPauseState() {
 function wrapAxis(v, max) {
   const m = ((v % max) + max) % max;
   return m;
+}
+
+function hashSeed(text = '') {
+  let h = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    h ^= text.charCodeAt(i);
+    h = Math.imul(h, 16777619);
+  }
+  return (h >>> 0) || 1;
+}
+
+function seededRand(seedObj) {
+  seedObj.value = (1664525 * seedObj.value + 1013904223) >>> 0;
+  return seedObj.value / 0xffffffff;
+}
+
+function ensureNpcAppearance(id, base = {}, idx = 0, fallbackColor = '#7dd3fc') {
+  const seedObj = { value: hashSeed(id) ^ (idx + 1) };
+  const palette = Array.isArray(base.palette) && base.palette.length >= 2
+    ? base.palette
+    : NPC_STYLE_PALETTES[idx % NPC_STYLE_PALETTES.length] || [fallbackColor, '#334155'];
+  const picked = new Set(Array.isArray(base.accessoryFlags) ? base.accessoryFlags : []);
+  if (id === 'maru') picked.add('headset');
+  while (picked.size < 2) {
+    const next = NPC_ACCESSORY_POOL[Math.floor(seededRand(seedObj) * NPC_ACCESSORY_POOL.length) % NPC_ACCESSORY_POOL.length];
+    picked.add(next);
+  }
+
+  return {
+    ...base,
+    palette,
+    accessoryFlags: Array.from(picked),
+    heightScale: base.heightScale || (0.94 + seededRand(seedObj) * 0.14),
+    headScale: base.headScale || (0.92 + seededRand(seedObj) * 0.3),
+    torsoScale: base.torsoScale || [0.9 + seededRand(seedObj) * 0.28, 0.96 + seededRand(seedObj) * 0.12, 0.9 + seededRand(seedObj) * 0.28],
+    limbScale: base.limbScale || (0.9 + seededRand(seedObj) * 0.22),
+    faceVariant: base.faceVariant || (seededRand(seedObj) > 0.5 ? 'smile' : 'flat'),
+  };
 }
 
 function wrapWorldPoint(p) {
@@ -954,7 +999,7 @@ function initNPCs() {
     poiVisitsToday: 0,
     visitedPoiToday: {},
     traits: NPC_TRAITS[h.id] || NPC_TRAITS.nari,
-    appearance: { ...(NPC_APPEARANCE[h.id] || {}), palette: (NPC_APPEARANCE[h.id]?.palette || [h.color, '#334155']) },
+    appearance: ensureNpcAppearance(h.id, NPC_APPEARANCE[h.id] || {}, idx, h.color),
     routineSlot: null,
     gesture: 'idle',
     gestureTimer: 0,
@@ -3108,7 +3153,7 @@ function setupPostProcessing(renderer, scene, camera) {
   }
 }
 
-function createRigCharacter(primary = '#3b82f6', secondary = '#0f172a', scale = 1, mats = null) {
+function createRigCharacter(primary = '#3b82f6', secondary = '#0f172a', scale = 1, mats = null, profile = {}) {
   const g = new THREE.Group();
   const toonGrad = mats?.toonGradient;
   const bodyMat = mats?.style === 'toon'
@@ -3140,16 +3185,26 @@ function createRigCharacter(primary = '#3b82f6', secondary = '#0f172a', scale = 
   legR.position.set(0.16 * scale, 0.42 * scale, 0);
 
   const eyeMat = new THREE.MeshBasicMaterial({ color: '#111827' });
-  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(0.04 * scale, 8, 8), eyeMat);
+  const eyeSize = 0.036 * scale * (profile.headScale || 1);
+  const eyeL = new THREE.Mesh(new THREE.SphereGeometry(eyeSize, 8, 8), eyeMat);
   const eyeR = eyeL.clone();
   eyeL.position.set(-0.13 * scale, 2.0 * scale, 0.34 * scale);
   eyeR.position.set(0.13 * scale, 2.0 * scale, 0.34 * scale);
 
-  const mouth = new THREE.Mesh(new THREE.BoxGeometry(0.1 * scale, 0.02 * scale, 0.01 * scale), new THREE.MeshBasicMaterial({ color: '#7f1d1d' }));
+  const mouth = new THREE.Mesh(new THREE.BoxGeometry((profile.faceVariant === 'smile' ? 0.12 : 0.09) * scale, 0.02 * scale, 0.01 * scale), new THREE.MeshBasicMaterial({ color: '#7f1d1d' }));
   mouth.position.set(0, 1.86 * scale, 0.36 * scale);
+  if (profile.faceVariant === 'smile') mouth.rotation.z = 0.12;
 
   g.add(torso, head, armL, armR, legL, legR, eyeL, eyeR, mouth);
-  g.userData.parts = { armL, armR, legL, legR, torso, eyeL, eyeR };
+
+  const torsoScale = profile.torsoScale || [1, 1, 1];
+  torso.scale.set(torsoScale[0] || 1, torsoScale[1] || 1, torsoScale[2] || 1);
+  const headScale = profile.headScale || 1;
+  head.scale.set(headScale, headScale, headScale);
+  const limbScale = profile.limbScale || 1;
+  [armL, armR, legL, legR].forEach((part) => part.scale.set(limbScale, limbScale, limbScale));
+
+  g.userData.parts = { armL, armR, legL, legR, torso, head, eyeL, eyeR, mouth };
   g.userData.phase = Math.random() * Math.PI * 2;
   return g;
 }
@@ -3205,6 +3260,17 @@ function buildAccessoryMesh(flags = [], scale = 1, mats = null) {
     strapL.position.set(-0.13 * scale, 1.06 * scale, -0.17 * scale);
     strapR.position.set(0.13 * scale, 1.06 * scale, -0.17 * scale);
     group.add(bag, strapL, strapR);
+  }
+  if (flags.includes('scarf')) {
+    const scarfMat = mats?.style === 'toon'
+      ? new THREE.MeshToonMaterial({ color: '#ef4444', gradientMap: toonGrad })
+      : new THREE.MeshStandardMaterial({ color: '#ef4444', roughness: 0.5, metalness: 0.03 });
+    const neckRing = new THREE.Mesh(new THREE.TorusGeometry(0.24 * scale, 0.025 * scale, 8, 18), scarfMat);
+    neckRing.rotation.x = Math.PI / 2;
+    neckRing.position.set(0, 1.72 * scale, 0.02 * scale);
+    const tail = new THREE.Mesh(new THREE.PlaneGeometry(0.13 * scale, 0.26 * scale), scarfMat);
+    tail.position.set(0.07 * scale, 1.56 * scale, 0.18 * scale);
+    group.add(neckRing, tail);
   }
   return group;
 }
@@ -3525,23 +3591,10 @@ function buildThreeWorld() {
   markAssetStats('model', true);
 
   render3d.npcMeshes = state.npcs.map((npc, idx) => {
-    const a = npc.appearance || NPC_APPEARANCE[npc.id] || {};
-    const palette = a.palette || [
-      ['#f6b18f', '#cc7a66'],
-      ['#98ddb4', '#5e9877'],
-      ['#c6b8f7', '#7f73c0'],
-    ][idx % 3];
-    const mesh = createRigCharacter(palette[0], palette[1], a.heightScale || 0.98, mats);
-    const parts = mesh.userData?.parts;
-    if (parts) {
-      if (a.bodyType === 'stocky') {
-        parts.torso.scale.set(1.12, 1.0, 1.12);
-        parts.legL.scale.set(1.05, 1.0, 1.05);
-        parts.legR.scale.set(1.05, 1.0, 1.05);
-      } else if (a.bodyType === 'slim') {
-        parts.torso.scale.set(0.92, 1.03, 0.92);
-      }
-    }
+    const a = ensureNpcAppearance(npc.id, npc.appearance || NPC_APPEARANCE[npc.id] || {}, idx, npc.color);
+    npc.appearance = a;
+    const palette = a.palette || NPC_STYLE_PALETTES[idx % NPC_STYLE_PALETTES.length];
+    const mesh = createRigCharacter(palette[0], palette[1], a.heightScale || 0.98, mats, a);
     mesh.add(buildAccessoryMesh(a.accessoryFlags || [], a.heightScale || 1, mats));
     addNameplate(mesh, npc.name);
     render3d.world.add(mesh);
