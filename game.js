@@ -134,6 +134,15 @@ const NPC_ROUTINES = {
   night: { stateWeight: { idle: 0.48, social: 0.2, wander: 0.14, fish: 0.18 }, poiWeight: { house: 0.56, campfire: 0.18, lookout: 0.14, pier: 0.12 } },
 };
 
+const NPC_APPEARANCE = {
+  luna: { baseModelId: 'kenney_female_a', palette: ['#f7b7d0', '#7c3aed'], accessoryFlags: ['hat', 'headset'], bodyType: 'slim', heightScale: 1.02 },
+  bomi: { baseModelId: 'kenney_farmer', palette: ['#9fe1a8', '#256d5a'], accessoryFlags: ['backpack'], bodyType: 'normal', heightScale: 0.98 },
+  maru: { baseModelId: 'kenney_fisher', palette: ['#f6c38d', '#1d4ed8'], accessoryFlags: ['glasses', 'headset'], bodyType: 'stocky', heightScale: 1.06 },
+  nari: { baseModelId: 'kenney_scout', palette: ['#d7c1ff', '#7f1d1d'], accessoryFlags: ['hat'], bodyType: 'slim', heightScale: 0.96 },
+  toto: { baseModelId: 'kenney_worker', palette: ['#b6e1ff', '#0f766e'], accessoryFlags: ['backpack', 'glasses'], bodyType: 'stocky', heightScale: 1.04 },
+  pipi: { baseModelId: 'kenney_artist', palette: ['#ffd6a5', '#be185d'], accessoryFlags: ['headset'], bodyType: 'normal', heightScale: 1.0 },
+};
+
 const biomes = Array.from({ length: MAP_H }, (_, gy) =>
   Array.from({ length: MAP_W }, (_, gx) => {
     if (gx > WATER.x1 && gx < WATER.x2 && gy > WATER.y1 && gy < WATER.y2) return 'water';
@@ -202,6 +211,7 @@ const state = {
   barterOffers: {},
   dialoguePools: {},
   debugPaths: false,
+  debugRenderInfo: false,
   renderStyle: 'pbr',
   paused: false,
   pauseFlags: { overlay: false, modal: false },
@@ -220,6 +230,7 @@ const state = {
     treeCount: 120,
     rainCount: 900,
     autoOptimize: true,
+    npcNameplates: true,
     mouseSensitivity: 1,
   },
 };
@@ -238,7 +249,7 @@ const ACTION_LABELS = {
   moveUp: '위로 이동', moveDown: '아래 이동', moveLeft: '왼쪽 이동', moveRight: '오른쪽 이동',
   run: '달리기', interact: '상호작용', fish: '낚시/타이밍', openMap: '지도 열기',
   camRotateLeft: '카메라 좌회전', camRotateRight: '카메라 우회전', camZoomIn: '카메라 줌 인', camZoomOut: '카메라 줌 아웃',
-  pauseMenu: '일시정지 메뉴', toggleStyle: '스타일 토글', toggle3D: '2D/3D 전환', toggleDebug: '디버그 토글',
+  pauseMenu: '일시정지 메뉴', toggleStyle: '스타일 토글', toggle3D: '2D/3D 전환', toggleDebug: '디버그 토글', toggleDebugInfo: '렌더 디버그(F3)',
 };
 
 const DEFAULT_BINDINGS = {
@@ -258,6 +269,7 @@ const DEFAULT_BINDINGS = {
   camZoomOut: ['KeyX'],
   pauseMenu: ['Escape'],
   toggleDebug: ['KeyP'],
+  toggleDebugInfo: ['F3'],
 };
 
 const input = {
@@ -453,8 +465,12 @@ const render3d = {
   bloomPass: null,
   usePostFX: false,
   modelRoot: 'assets/models',
+  modelCache: new Map(),
+  textureFailureUrls: [],
+  modelFailureUrls: [],
   textureStats: { loaded: 0, failed: 0 },
   modelStats: { loaded: 0, failed: 0 },
+  waterDebug: { exists: false, transparent: false, depthWrite: true, side: 'FrontSide', renderOrder: 0, frustumCulled: true },
   debugGroup: null,
   fxGroup: null,
   fxParticles: [],
@@ -695,6 +711,7 @@ function initNPCs() {
     poiVisitsToday: 0,
     visitedPoiToday: {},
     traits: NPC_TRAITS[h.id] || NPC_TRAITS.nari,
+    appearance: { ...(NPC_APPEARANCE[h.id] || {}), palette: (NPC_APPEARANCE[h.id]?.palette || [h.color, '#334155']) },
     routineSlot: null,
     gesture: 'idle',
     gestureTimer: 0,
@@ -1970,6 +1987,7 @@ function pushScreen(name, payload = {}) {
     settings: () => ({ title: '⚙️ 설정', html: `
       <div class="overlay-row"><span>자동 최적화</span><button data-ui="toggleAutoOpt">${state.settings.autoOptimize ? 'ON' : 'OFF'}</button></div>
       <div class="overlay-row"><span>마우스 감도</span><button data-ui="mouseDown">-</button><span>${state.settings.mouseSensitivity.toFixed(1)}</span><button data-ui="mouseUp">+</button></div>
+      <div class="overlay-row"><span>NPC 이름표</span><button data-ui="toggleNameplate">${state.settings.npcNameplates ? 'ON' : 'OFF'}</button></div>
       <div class="overlay-actions"><button data-ui="back" class="secondary">뒤로</button></div>` }),
     graphics: () => ({ title: '🖥️ 그래픽', html: `
       <div class="overlay-actions">
@@ -2033,6 +2051,7 @@ function handleOverlayAction(action, btn) {
   if (action === 'toggleAutoOpt') { state.settings.autoOptimize = !state.settings.autoOptimize; persistPreferences(); return replaceScreen('settings'); }
   if (action === 'mouseUp') { state.settings.mouseSensitivity = clamp(state.settings.mouseSensitivity + 0.1, 0.3, 2.4); persistPreferences(); return replaceScreen('settings'); }
   if (action === 'mouseDown') { state.settings.mouseSensitivity = clamp(state.settings.mouseSensitivity - 0.1, 0.3, 2.4); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'toggleNameplate') { state.settings.npcNameplates = !state.settings.npcNameplates; persistPreferences(); return replaceScreen('settings'); }
   if (action === 'preset') { applyGraphicsPreset(btn.dataset.preset || 'medium'); return replaceScreen('graphics'); }
   if (action === 'resetBinds') { input.bindings = JSON.parse(JSON.stringify(DEFAULT_BINDINGS)); persistPreferences(); return replaceScreen('keybinds'); }
   if (action === 'rebind') {
@@ -2479,10 +2498,16 @@ function createNoiseTexture(base = '#6fa86a', accent = '#4f7f49', size = 256, sc
   return tex;
 }
 
-function markAssetStats(type, ok = true) {
+function markAssetStats(type, ok = true, url = '') {
   const key = ok ? 'loaded' : 'failed';
-  if (type === 'texture') render3d.textureStats[key] += 1;
-  if (type === 'model') render3d.modelStats[key] += 1;
+  if (type === 'texture') {
+    render3d.textureStats[key] += 1;
+    if (!ok && url && !render3d.textureFailureUrls.includes(url)) render3d.textureFailureUrls.push(url);
+  }
+  if (type === 'model') {
+    render3d.modelStats[key] += 1;
+    if (!ok && url && !render3d.modelFailureUrls.includes(url)) render3d.modelFailureUrls.push(url);
+  }
 }
 
 function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08a') {
@@ -2494,7 +2519,6 @@ function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08
 
   const tryLoad = (idx = 0) => {
     if (idx >= urls.length) {
-      markAssetStats('texture', false);
       return;
     }
     loader.load(
@@ -2503,12 +2527,16 @@ function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
         tex.repeat.set(repeat[0], repeat[1]);
         tex.colorSpace = THREE.SRGBColorSpace;
+        tex.anisotropy = 4;
         fallback.image = tex.image;
         fallback.needsUpdate = true;
-        markAssetStats('texture', true);
+        markAssetStats('texture', true, urls[idx]);
       },
       undefined,
-      () => tryLoad(idx + 1),
+      () => {
+        if (idx === urls.length - 1) markAssetStats('texture', false, urls[idx]);
+        tryLoad(idx + 1);
+      },
     );
   };
 
@@ -2658,6 +2686,20 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
   };
 }
 
+
+async function loadModelCached(url, loader) {
+  if (render3d.modelCache.has(url)) {
+    const src = render3d.modelCache.get(url);
+    return src.clone(true);
+  }
+  const gltf = await new Promise((resolve, reject) => {
+    loader.load(url, resolve, undefined, reject);
+  });
+  const root = gltf.scene;
+  render3d.modelCache.set(url, root);
+  return root.clone(true);
+}
+
 async function loadFreeWorldProps() {
   if (!render3d.world) return;
 
@@ -2670,7 +2712,7 @@ async function loadFreeWorldProps() {
     mesh.receiveShadow = true;
     render3d.world.add(mesh);
     render3d.props.push(mesh);
-    markAssetStats('model', true);
+    markAssetStats('model', true, 'procedural');
   };
 
   const fallbackPack = () => {
@@ -2678,18 +2720,23 @@ async function loadFreeWorldProps() {
     addFallbackProp(new THREE.ConeGeometry(0.42, 1.6, 8), toon ? new THREE.MeshToonMaterial({ color: '#5a8f53', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#5a8f53', roughness: 0.9 }), [-10, 1.2, -6], 0.1, 1.2);
     addFallbackProp(new THREE.CylinderGeometry(0.14, 0.2, 1.0, 8), toon ? new THREE.MeshToonMaterial({ color: '#6d4c41', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#6d4c41', roughness: 0.9 }), [-10, 0.5, -6], 0.1, 1.2);
     addFallbackProp(new THREE.BoxGeometry(1.2, 0.8, 0.8), toon ? new THREE.MeshToonMaterial({ color: '#f2c4a6', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#f2c4a6', roughness: 0.72 }), [10, 0.45, -7], 0.4, 1.0);
+    addFallbackProp(new THREE.CylinderGeometry(0.08, 0.08, 1.4, 6), new THREE.MeshStandardMaterial({ color: '#4b5563', roughness: 0.75 }), [4, 0.7, -9], 0.0, 1.0);
+    addFallbackProp(new THREE.SphereGeometry(0.46, 8, 8), new THREE.MeshStandardMaterial({ color: '#9ca3af', roughness: 0.95 }), [5, 0.4, -9], 0.0, 1.0);
   };
 
   const specs = [
     { url: `${render3d.modelRoot}/tree.glb`, pos: [-10, 0, -6], rotY: 0.4, scale: 1.4 },
     { url: `${render3d.modelRoot}/prop_house.glb`, pos: [10, 0, -7], rotY: -0.25, scale: 1.2 },
+    { url: `${render3d.modelRoot}/kenney/nature-kit/tree.glb`, pos: [6, 0, -12], rotY: 0.15, scale: 0.9 },
+    { url: `${render3d.modelRoot}/kenney/nature-kit/rock.glb`, pos: [-5, 0, -11], rotY: 0.4, scale: 0.9 },
+    { url: `${render3d.modelRoot}/kenney/nature-kit/fence.glb`, pos: [0, 0, -13], rotY: 1.57, scale: 0.8 },
   ];
 
   const loader = new GLTFLoader();
   let loadedCount = 0;
-  const loadOne = (spec) => new Promise((resolve) => {
-    loader.load(spec.url, (gltf) => {
-      const model = gltf.scene;
+  await Promise.all(specs.map(async (spec) => {
+    try {
+      const model = await loadModelCached(spec.url, loader);
       model.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
       model.rotation.y = spec.rotY;
       model.scale.setScalar(spec.scale);
@@ -2701,16 +2748,13 @@ async function loadFreeWorldProps() {
       });
       render3d.world.add(model);
       render3d.props.push(model);
-      markAssetStats('model', true);
+      markAssetStats('model', true, spec.url);
       loadedCount += 1;
-      resolve();
-    }, undefined, () => {
-      markAssetStats('model', false);
-      resolve();
-    });
-  });
+    } catch {
+      markAssetStats('model', false, spec.url);
+    }
+  }));
 
-  await Promise.all(specs.map(loadOne));
   if (loadedCount === 0) fallbackPack();
 }
 
@@ -2792,6 +2836,102 @@ function createRigCharacter(primary = '#3b82f6', secondary = '#0f172a', scale = 
   g.userData.parts = { armL, armR, legL, legR, torso, eyeL, eyeR };
   g.userData.phase = Math.random() * Math.PI * 2;
   return g;
+}
+
+
+function buildAccessoryMesh(flags = [], scale = 1, mats = null) {
+  const group = new THREE.Group();
+  if (!flags?.length) return group;
+  const toonGrad = mats?.toonGradient;
+  const darkMat = mats?.style === 'toon'
+    ? new THREE.MeshToonMaterial({ color: '#1f2937', gradientMap: toonGrad })
+    : new THREE.MeshStandardMaterial({ color: '#1f2937', roughness: 0.65, metalness: 0.12 });
+  const brightMat = mats?.style === 'toon'
+    ? new THREE.MeshToonMaterial({ color: '#60a5fa', gradientMap: toonGrad })
+    : new THREE.MeshStandardMaterial({ color: '#60a5fa', roughness: 0.38, metalness: 0.4 });
+
+  if (flags.includes('hat')) {
+    const brim = new THREE.Mesh(new THREE.CylinderGeometry(0.36 * scale, 0.4 * scale, 0.05 * scale, 16), brightMat);
+    brim.position.y = 2.33 * scale;
+    const crown = new THREE.Mesh(new THREE.CylinderGeometry(0.22 * scale, 0.24 * scale, 0.2 * scale, 14), darkMat);
+    crown.position.y = 2.45 * scale;
+    group.add(brim, crown);
+  }
+  if (flags.includes('glasses')) {
+    const ringGeo = new THREE.TorusGeometry(0.07 * scale, 0.015 * scale, 8, 16);
+    const left = new THREE.Mesh(ringGeo, darkMat);
+    const right = new THREE.Mesh(ringGeo, darkMat);
+    const bridge = new THREE.Mesh(new THREE.BoxGeometry(0.09 * scale, 0.012 * scale, 0.012 * scale), darkMat);
+    left.position.set(-0.11 * scale, 2.0 * scale, 0.36 * scale);
+    right.position.set(0.11 * scale, 2.0 * scale, 0.36 * scale);
+    bridge.position.set(0, 2.0 * scale, 0.36 * scale);
+    left.rotation.x = right.rotation.x = bridge.rotation.x = Math.PI / 2;
+    group.add(left, right, bridge);
+  }
+  if (flags.includes('headset')) {
+    const band = new THREE.Mesh(new THREE.TorusGeometry(0.28 * scale, 0.016 * scale, 8, 24, Math.PI), darkMat);
+    band.position.set(0, 2.18 * scale, 0);
+    band.rotation.y = Math.PI;
+    const earL = new THREE.Mesh(new THREE.SphereGeometry(0.06 * scale, 10, 10), brightMat);
+    const earR = new THREE.Mesh(new THREE.SphereGeometry(0.06 * scale, 10, 10), brightMat);
+    earL.position.set(-0.34 * scale, 2.05 * scale, 0);
+    earR.position.set(0.34 * scale, 2.05 * scale, 0);
+    const mic = new THREE.Mesh(new THREE.CylinderGeometry(0.008 * scale, 0.008 * scale, 0.14 * scale, 6), darkMat);
+    mic.position.set(0.26 * scale, 1.98 * scale, 0.21 * scale);
+    mic.rotation.x = Math.PI * 0.45;
+    group.add(band, earL, earR, mic);
+  }
+  if (flags.includes('backpack')) {
+    const bag = new THREE.Mesh(new THREE.BoxGeometry(0.28 * scale, 0.34 * scale, 0.12 * scale), brightMat);
+    bag.position.set(0, 1.08 * scale, -0.25 * scale);
+    const strapL = new THREE.Mesh(new THREE.CylinderGeometry(0.02 * scale, 0.02 * scale, 0.36 * scale, 8), darkMat);
+    const strapR = strapL.clone();
+    strapL.position.set(-0.13 * scale, 1.06 * scale, -0.17 * scale);
+    strapR.position.set(0.13 * scale, 1.06 * scale, -0.17 * scale);
+    group.add(bag, strapL, strapR);
+  }
+  return group;
+}
+
+function addNameplate(group, name = '') {
+  const plateCanvas = document.createElement('canvas');
+  plateCanvas.width = 256;
+  plateCanvas.height = 64;
+  const g = plateCanvas.getContext('2d');
+  g.clearRect(0, 0, 256, 64);
+  g.fillStyle = 'rgba(15,23,42,0.72)';
+  g.fillRect(4, 4, 248, 56);
+  g.fillStyle = '#f8fafc';
+  g.font = 'bold 26px system-ui';
+  g.textAlign = 'center';
+  g.textBaseline = 'middle';
+  g.fillText(name, 128, 33);
+  const tex = new THREE.CanvasTexture(plateCanvas);
+  const sprite = new THREE.Sprite(new THREE.SpriteMaterial({ map: tex, transparent: true, depthWrite: false }));
+  sprite.position.set(0, 2.95, 0);
+  sprite.scale.set(1.8, 0.45, 1);
+  group.add(sprite);
+  group.userData.nameplate = sprite;
+}
+
+function applyWaterRenderState(waterMesh) {
+  if (!waterMesh || !waterMesh.material) return;
+  const m = waterMesh.material;
+  m.side = THREE.DoubleSide;
+  m.depthTest = true;
+  if ('transparent' in m) m.transparent = state.renderStyle !== 'toon';
+  if ('opacity' in m && state.renderStyle !== 'toon') m.opacity = 0.86;
+  if ('depthWrite' in m) m.depthWrite = state.renderStyle === 'toon';
+  waterMesh.renderOrder = 8;
+  waterMesh.frustumCulled = false;
+  render3d.waterDebug = {
+    exists: true,
+    transparent: !!m.transparent,
+    depthWrite: !!m.depthWrite,
+    side: m.side === THREE.DoubleSide ? 'DoubleSide' : 'FrontSide',
+    renderOrder: waterMesh.renderOrder,
+    frustumCulled: waterMesh.frustumCulled,
+  };
 }
 
 function addBuildingGroundShadow(group, w = 3, h = 2.2) {
@@ -2944,6 +3084,7 @@ function buildThreeWorld() {
   water.rotation.x = -Math.PI / 2;
   water.position.set((WATER.x1 + WATER.x2) / 2 - MAP_W / 2, 0.15, (WATER.y1 + WATER.y2) / 2 - MAP_H / 2);
   water.receiveShadow = true;
+  applyWaterRenderState(water);
   render3d.water = water;
   render3d.world.add(water);
 
@@ -3067,12 +3208,25 @@ function buildThreeWorld() {
   markAssetStats('model', true);
 
   render3d.npcMeshes = state.npcs.map((npc, idx) => {
-    const palette = [
+    const a = npc.appearance || NPC_APPEARANCE[npc.id] || {};
+    const palette = a.palette || [
       ['#f6b18f', '#cc7a66'],
       ['#98ddb4', '#5e9877'],
       ['#c6b8f7', '#7f73c0'],
     ][idx % 3];
-    const mesh = createRigCharacter(palette[0], palette[1], 0.98, mats);
+    const mesh = createRigCharacter(palette[0], palette[1], a.heightScale || 0.98, mats);
+    const parts = mesh.userData?.parts;
+    if (parts) {
+      if (a.bodyType === 'stocky') {
+        parts.torso.scale.set(1.12, 1.0, 1.12);
+        parts.legL.scale.set(1.05, 1.0, 1.05);
+        parts.legR.scale.set(1.05, 1.0, 1.05);
+      } else if (a.bodyType === 'slim') {
+        parts.torso.scale.set(0.92, 1.03, 0.92);
+      }
+    }
+    mesh.add(buildAccessoryMesh(a.accessoryFlags || [], a.heightScale || 1, mats));
+    addNameplate(mesh, npc.name);
     render3d.world.add(mesh);
     markAssetStats('model', true);
     return mesh;
@@ -3096,13 +3250,15 @@ async function ensure3DWorld() {
     render3d.loading = true;
   render3d.textureStats = { loaded: 0, failed: 0 };
   render3d.modelStats = { loaded: 0, failed: 0 };
+  render3d.textureFailureUrls = [];
+  render3d.modelFailureUrls = [];
   try {
     ui.game3d.innerHTML = '';
     const scene = new THREE.Scene();
     scene.background = new THREE.Color('#9ad2ff');
     scene.fog = new THREE.Fog('#a5d8ff', 26, 95);
 
-    const camera = new THREE.PerspectiveCamera(55, 16 / 9, 0.1, 220);
+    const camera = new THREE.PerspectiveCamera(55, 16 / 9, 0.08, 280);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, state.settings.pixelRatioCap || 1.5));
     renderer.shadowMap.enabled = true;
@@ -3213,6 +3369,11 @@ function sync3DEntities() {
     mesh.rotation.y = npc.lookYaw;
     const npcMoving = Math.abs(npc.vx || 0) + Math.abs(npc.vy || 0) > 0.05;
     animateRigCharacter(mesh, state.time * 0.016 + i * 0.7, npcMoving);
+    const plate = mesh.userData?.nameplate;
+    if (plate) {
+      plate.visible = !!state.settings.npcNameplates;
+      if (render3d.camera) plate.quaternion.copy(render3d.camera.quaternion);
+    }
     const parts = mesh.userData?.parts;
     if (parts && !npcMoving) {
       if (npc.gesture === 'nod') parts.torso.rotation.x = Math.sin(state.time * 0.08 + i) * 0.09;
@@ -3241,6 +3402,7 @@ function sync3DEntities() {
       render3d.mats.waterNormal.offset.y = state.time * 0.00045;
     }
     render3d.water.position.y = 0.13 + Math.sin(state.time * 0.02) * 0.03;
+    applyWaterRenderState(render3d.water);
   }
 }
 
@@ -3258,6 +3420,12 @@ function renderWorld3D() {
     if (state.settings.postFX) { state.settings.postFX = false; render3d.usePostFX = false; }
     else if (state.settings.shadowMapSize > 1024) { state.settings.shadowMapSize = 1024; applyGraphicsSettings(); }
     else if (state.settings.pixelRatioCap > 1) { state.settings.pixelRatioCap = 1; applyGraphicsSettings(); }
+  } else if (state.settings.autoOptimize && render3d.fpsSamples.length > 100 && render3d.fpsAvg > 58) {
+    const preset = GRAPHICS_PRESETS[state.settings.graphicsPreset || 'medium'] || GRAPHICS_PRESETS.medium;
+    if (state.settings.pixelRatioCap < preset.pixelRatioCap) {
+      state.settings.pixelRatioCap = Math.min(preset.pixelRatioCap, state.settings.pixelRatioCap + 0.25);
+      applyGraphicsSettings();
+    }
   }
 
   const centerX = state.player.x / TILE - MAP_W / 2;
@@ -3522,6 +3690,12 @@ function updateUI() {
     const dbg = state.npcs.map((n) => `${n.name}:${n.state}`).join(' · ');
     ui.message.textContent = `${ui.message.textContent ? `${ui.message.textContent} | ` : ''}DBG ${dbg}`;
   }
+  if (state.debugRenderInfo && render3d.camera) {
+    const wd = render3d.waterDebug || {};
+    const waterPos = render3d.water?.position ? `${render3d.water.position.x.toFixed(2)},${render3d.water.position.y.toFixed(2)},${render3d.water.position.z.toFixed(2)}` : 'none';
+    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | TXF:${render3d.textureFailureUrls.length} MDF:${render3d.modelFailureUrls.length}`;
+    ui.message.textContent = `${ui.message.textContent ? `${ui.message.textContent} | ` : ''}${dbg}`;
+  }
 
   if (now - state.lastUiUpdate < 100) return;
   state.lastUiUpdate = now;
@@ -3675,6 +3849,7 @@ window.addEventListener('keydown', (e) => {
   if (input.consume('openMap')) { openWorldMap(); return; }
   if (input.consume('interact')) { interact(); return; }
   if (input.consume('toggleDebug')) { state.debugPaths = !state.debugPaths; setMsg(`NPC 디버그 ${state.debugPaths ? 'ON' : 'OFF'}`); return; }
+  if (input.consume('toggleDebugInfo')) { state.debugRenderInfo = !state.debugRenderInfo; setMsg(`렌더 디버그 ${state.debugRenderInfo ? 'ON' : 'OFF'}`); return; }
   if (input.consume('toggle3D')) { toggleRenderMode(); return; }
   if (input.consume('toggleStyle')) { toggleRenderStyle(); return; }
 
@@ -3747,7 +3922,19 @@ function applyGraphicsSettings() {
   render3d.renderer.shadowMap.enabled = !!state.settings.shadows;
   if (render3d.sun?.shadow?.mapSize) render3d.sun.shadow.mapSize.set(state.settings.shadowMapSize || 2048, state.settings.shadowMapSize || 2048);
   render3d.usePostFX = !!state.settings.postFX && !!render3d.composer;
+  if (render3d.rain?.geometry?.attributes?.position) {
+    const nextCount = clamp(Math.floor(state.settings.rainCount || 900), 200, 2000);
+    const prevCount = render3d.rain.geometry.attributes.position.count || 0;
+    if (prevCount !== nextCount) {
+      const pos = new Float32Array(nextCount * 3);
+      for (let i = 0; i < nextCount; i += 1) {
+        pos[i * 3] = rnd(-34, 34);
+        pos[i * 3 + 1] = rnd(2, 24);
+        pos[i * 3 + 2] = rnd(-26, 26);
+      }
+      render3d.rain.geometry.setAttribute('position', new THREE.BufferAttribute(pos, 3));
+    }
+  }
 }
 
 if (!state.settings.graphicsPreset) applyGraphicsPreset('medium');
-

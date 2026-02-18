@@ -174,3 +174,29 @@ python3 scripts/download_assets.py
 - ESC(`pauseMenu` 바인딩) 우선순위: **대화 닫기 → 모달 닫기 → 오버레이 뒤로가기 → 일시정지 메뉴 열기**.
 - 상점/박물관/지도 버튼 라벨과 월드 프롬프트는 현재 리바인딩 키를 자동 반영합니다.
 - 3D 카메라는 우클릭/중클릭 드래그 회전 + 휠 줌이며, 민감도는 설정 화면에서 조정됩니다.
+
+## v2.10 에셋 파이프라인/3D 안정화 핫픽스
+
+- `scripts/assets_manifest.json`을 CC0 중심으로 확장해 Poly Haven 텍스처/HDRI + Kenney 페이지(자연/캐릭터) 기반 다운로드를 선언형으로 관리합니다.
+- `scripts/download_assets.py`는 Kenney 페이지 HTML에서 zip 링크를 탐색하고(glb 우선), 압축 해제 후 `assets/models/kenney/*`로 정리합니다.
+- 다운로드 로그에 텍스처/모델 성공 수와 실패 URL 목록이 출력됩니다.
+- 3D 모델/텍스처 실패 URL은 런타임에서 `TX/MD` 카운트와 함께 디버그(F3)로 확인 가능합니다.
+- 수면 머티리얼을 안정 조합(DoubleSide, depth 처리, renderOrder, frustumCulled=false)으로 고정해 근거리에서 사라지던 현상을 줄였습니다.
+- NPC 6명은 외형 프로필(팔레트/체형/액세서리: 모자·안경·헤드셋·백팩)과 이름표 옵션으로 식별성을 강화했습니다.
+- 그래픽 설정에 `NPC 이름표` 토글을 추가했습니다.
+
+### 에셋 다운로드 (권장)
+
+```bash
+python3 scripts/download_assets.py
+```
+
+실패 항목이 있더라도 게임은 절차적 fallback 렌더로 계속 플레이할 수 있습니다.
+
+### 렌더 디버그(F3)
+
+- 카메라 near/far
+- 수면 material 플래그(transparent/depthWrite/side/renderOrder/frustumCulled)
+- 수면 월드 좌표
+- 텍스처/모델 실패 개수
+

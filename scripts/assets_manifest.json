@@ -1,35 +1,66 @@
 {
   "textures": [
     {
-      "name": "grass_color",
-      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_diff_1k.jpg",
-      "output": "assets/pbr/grass_color.jpg"
+      "name": "grass",
+      "maps": {
+        "diff": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_diff_1k.jpg",
+        "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_nor_gl_1k.jpg",
+        "rough": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_rough_1k.jpg"
+      },
+      "output_dir": "assets/stylized"
     },
     {
-      "name": "wood_color",
-      "url": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_diff_1k.jpg",
-      "output": "assets/pbr/wood_color.jpg"
+      "name": "dirt",
+      "maps": {
+        "diff": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt_04/dirt_04_diff_1k.jpg",
+        "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt_04/dirt_04_nor_gl_1k.jpg",
+        "rough": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt_04/dirt_04_rough_1k.jpg"
+      },
+      "output_dir": "assets/pbr/dirt"
+    },
+    {
+      "name": "wood",
+      "maps": {
+        "diff": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_diff_1k.jpg",
+        "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_nor_gl_1k.jpg",
+        "rough": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_rough_1k.jpg"
+      },
+      "output_dir": "assets/stylized"
+    },
+    {
+      "name": "roof",
+      "maps": {
+        "diff": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_diff_1k.jpg",
+        "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_nor_gl_1k.jpg",
+        "rough": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_rough_1k.jpg"
+      },
+      "output_dir": "assets/stylized"
+    },
+    {
+      "name": "water",
+      "maps": {
+        "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/water_001/water_001_nor_gl_1k.jpg"
+      },
+      "output_dir": "assets/stylized"
     }
   ],
   "hdris": [
     {
-      "name": "sky",
+      "name": "kloppenheim_06_puresky_1k",
       "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloppenheim_06_puresky_1k.hdr",
       "output": "assets/pbr/kloppenheim_06_puresky_1k.hdr"
     }
   ],
-  "archives": [
+  "kenney_pages": [
     {
-      "name": "kenney_placeholder",
-      "url": "",
-      "output_dir": "assets/models/kenney",
-      "note": "CC0 Kenney zip direct URL을 채운 뒤 사용"
+      "name": "nature-kit",
+      "page": "https://kenney.nl/assets/nature-kit",
+      "output_dir": "assets/models/kenney/nature-kit"
     },
     {
-      "name": "quaternius_placeholder",
-      "url": "",
-      "output_dir": "assets/models/quaternius",
-      "note": "CC0 Quaternius zip direct URL을 채운 뒤 사용"
+      "name": "animated-characters-2",
+      "page": "https://kenney.nl/assets/animated-characters-2",
+      "output_dir": "assets/models/kenney/animated-characters-2"
     }
   ]
 }
