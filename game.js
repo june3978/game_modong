@@ -181,7 +181,7 @@ const state = {
   coins: 110,
   level: 1,
   xp: 0,
-  player: { x: 960, y: 1120, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false, lastSafeX: 960, lastSafeY: 1120, yaw: 0, targetYaw: 0, speed3D: 0, lastFrameX: 960, lastFrameY: 1120 },
+  player: { x: 960, y: 1120, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false, lastSafeX: 960, lastSafeY: 1120, yaw: 0, targetYaw: 0, speed3D: 0, lastFrameX: 960, lastFrameY: 1120, moveVX: 0, moveVY: 0 },
   inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, bug: 0, seed: 2, furniture: 0 },
   objects: [],
   fishes: [],
@@ -217,7 +217,7 @@ const state = {
   achievements: { bridgeMaster: false, museum10: false, relation90: false },
   decorScore: 0,
   renderMode: '3d',
-  camera3d: { yaw: 0.75, dist: 560, height: 300 },
+  camera3d: { yaw: 0.75, dist: 560, height: 300, yawVelocity: 0, targetDist: 560 },
   version: 'v2.2',
   buffs: { fish: 0, bug: 0, harvest: 0, discount: 0 },
   interactionFlags: {},
@@ -1206,6 +1206,8 @@ function initNPCs() {
     }
     n.vx = 0;
     n.vy = 0;
+    n.lastFrameX = n.x;
+    n.lastFrameY = n.y;
   });
 }
 
@@ -2841,8 +2843,10 @@ function playerMove() {
 
   if (state.renderMode === '3d' && !state.house.inside) {
     const mv = getCameraRelativeMoveVector(up, down, left, right, spd);
-    dx = mv.dx;
-    dy = mv.dy;
+    state.player.moveVX = (state.player.moveVX || 0) * 0.72 + mv.dx * 0.28;
+    state.player.moveVY = (state.player.moveVY || 0) * 0.72 + mv.dy * 0.28;
+    dx = state.player.moveVX;
+    dy = state.player.moveVY;
   } else {
     if (up) { dy -= spd; state.player.facing = 'up'; }
     if (down) { dy += spd; state.player.facing = 'down'; }
@@ -2894,7 +2898,9 @@ function playerMove() {
     state.player.lastFrameY = state.player.y;
   }
 
-  const moving = dx || dy;
+  if (state.renderMode !== '3d' || state.house.inside) { state.player.moveVX = 0; state.player.moveVY = 0; }
+
+  const moving = Math.hypot(dx, dy) > 0.001;
   if (moving) {
     state.player.energy = clamp(state.player.energy - (run ? 0.08 : 0.04), 0, 100);
     state.player.mood = clamp(state.player.mood + 0.01, 0, 100);
@@ -3938,15 +3944,17 @@ function sync3DEntities() {
     if (!mesh) return;
     const n = to3D(npc.x, npc.y);
     mesh.position.set(n.x, 0.25, n.z);
-    const moveDx = npc.vx || 0;
-    const moveDy = npc.vy || 0;
-    const npcMoving = Math.hypot(moveDx, moveDy) > 0.05;
+    const frameDx = circularDelta(npc.x, npc.lastFrameX ?? npc.x, WORLD_W);
+    const frameDy = circularDelta(npc.y, npc.lastFrameY ?? npc.y, WORLD_H);
+    const moveDx = Math.abs(frameDx) > 0.001 ? frameDx : (npc.vx || 0);
+    const moveDy = Math.abs(frameDy) > 0.001 ? frameDy : (npc.vy || 0);
+    const npcMoving = Math.hypot(moveDx, moveDy) > 0.03;
     if (npcMoving) {
       npc.targetYaw = -Math.atan2(moveDx, moveDy);
     } else if (npc.targetYaw == null) {
       npc.targetYaw = facingToYaw(npc.facing || 'down');
     }
-    npc.lookYaw = normalizeAngle((npc.lookYaw ?? npc.targetYaw) + shortestAngleDiff((npc.lookYaw ?? npc.targetYaw), npc.targetYaw) * 0.14);
+    npc.lookYaw = normalizeAngle((npc.lookYaw ?? npc.targetYaw) + shortestAngleDiff((npc.lookYaw ?? npc.targetYaw), npc.targetYaw) * 0.18);
     mesh.rotation.y = normalizeAngle(npc.lookYaw + (npc.modelForwardOffsetYaw ?? state.modelForwardOffsetYaw ?? 0));
     animateRigCharacter(mesh, state.time * 0.016 + i * 0.7, npcMoving);
     const plate = mesh.userData?.nameplate;
@@ -3963,6 +3971,8 @@ function sync3DEntities() {
       else if (npc.gesture === 'clap') { parts.armL.rotation.z = 0.25; parts.armR.rotation.z = -0.25; }
       else if (npc.gesture === 'sit') { parts.legL.rotation.x = 1.1; parts.legR.rotation.x = 1.1; }
     }
+    npc.lastFrameX = npc.x;
+    npc.lastFrameY = npc.y;
   });
 
   state.objects.forEach((obj, i) => {
@@ -4017,6 +4027,11 @@ function renderWorld3D() {
 
   const centerX = state.player.x / TILE - MAP_W / 2;
   const centerZ = state.player.y / TILE - MAP_H / 2;
+  state.camera3d.yaw += state.camera3d.yawVelocity || 0;
+  state.camera3d.yawVelocity = (state.camera3d.yawVelocity || 0) * 0.82;
+  state.camera3d.targetDist = state.camera3d.targetDist || state.camera3d.dist;
+  state.camera3d.dist = state.camera3d.dist * 0.85 + state.camera3d.targetDist * 0.15;
+
   const yaw = state.camera3d.yaw;
   const distNorm = clamp((state.camera3d.dist - 300) / 600, 0, 1);
   const dist = 14 + distNorm * 12;
@@ -4163,12 +4178,12 @@ function setupMouseControls() {
     if (!mouseCam.dragging || state.renderMode !== '3d') return;
     const dx = e.clientX - mouseCam.lastX;
     mouseCam.lastX = e.clientX;
-    state.camera3d.yaw += dx * 0.004 * (state.settings.mouseSensitivity || 1);
+    state.camera3d.yawVelocity += dx * 0.0009 * (state.settings.mouseSensitivity || 1);
   });
   ui.game3d.addEventListener('wheel', (e) => {
     if (state.renderMode !== '3d') return;
     e.preventDefault();
-    state.camera3d.dist = clamp(state.camera3d.dist + Math.sign(e.deltaY) * 22, 300, 900);
+    state.camera3d.targetDist = clamp((state.camera3d.targetDist || state.camera3d.dist) + Math.sign(e.deltaY) * 22, 300, 900);
   }, { passive: false });
 }
 
@@ -4290,7 +4305,7 @@ function updateUI() {
     const fwY = -Math.sin(state.camera3d.yaw || 0);
     const rtX = -fwY;
     const rtY = fwX;
-    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} d:${camDist.toFixed(2)} | BASIS f:${fwX.toFixed(2)},${fwY.toFixed(2)} r:${rtX.toFixed(2)},${rtY.toFixed(2)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | YAW p:${(state.player.yaw||0).toFixed(2)} t:${(state.player.targetYaw||0).toFixed(2)} off:${(state.modelForwardOffsetYaw||0).toFixed(2)} spd:${(state.player.speed3D||0).toFixed(2)} | TXF:${render3d.textureFailureUrls.length}(${txFail}) MDF:${render3d.modelFailureUrls.length}(${mdFail})`;
+    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} d:${camDist.toFixed(2)} | BASIS f:${fwX.toFixed(2)},${fwY.toFixed(2)} r:${rtX.toFixed(2)},${rtY.toFixed(2)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | CAM3D yv:${(state.camera3d.yawVelocity||0).toFixed(3)} d:${(state.camera3d.dist||0).toFixed(1)}/${(state.camera3d.targetDist||0).toFixed(1)} | YAW p:${(state.player.yaw||0).toFixed(2)} t:${(state.player.targetYaw||0).toFixed(2)} off:${(state.modelForwardOffsetYaw||0).toFixed(2)} spd:${(state.player.speed3D||0).toFixed(2)} | TXF:${render3d.textureFailureUrls.length}(${txFail}) MDF:${render3d.modelFailureUrls.length}(${mdFail})`;
     ui.message.textContent = `${ui.message.textContent ? `${ui.message.textContent} | ` : ''}${dbg}`;
   }
 
@@ -4470,8 +4485,8 @@ window.addEventListener('keydown', (e) => {
   if (state.renderMode === '3d') {
     if (input.consume('camRotateLeft')) { state.camera3d.yaw -= 0.08; return; }
     if (input.consume('camRotateRight')) { state.camera3d.yaw += 0.08; return; }
-    if (input.consume('camZoomIn')) { state.camera3d.dist = clamp(state.camera3d.dist - 28, 300, 900); return; }
-    if (input.consume('camZoomOut')) { state.camera3d.dist = clamp(state.camera3d.dist + 28, 300, 900); return; }
+    if (input.consume('camZoomIn')) { state.camera3d.targetDist = clamp((state.camera3d.targetDist || state.camera3d.dist) - 28, 300, 900); return; }
+    if (input.consume('camZoomOut')) { state.camera3d.targetDist = clamp((state.camera3d.targetDist || state.camera3d.dist) + 28, 300, 900); return; }
   }
 
   if (input.consume('fish')) { e.preventDefault(); fishingInput(); return; }
