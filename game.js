@@ -204,11 +204,13 @@ const state = {
   debugPaths: false,
   renderStyle: 'pbr',
   paused: false,
+  pauseFlags: { overlay: false, modal: false },
   uiStack: [],
   uiDirty: true,
   lastUiUpdate: 0,
   lastMiniMapUpdate: 0,
   miniMapCache: '',
+  miniMapTracker: { player: '', npcs: '' },
   settings: {
     graphicsPreset: 'medium',
     pixelRatioCap: 1.5,
@@ -302,6 +304,19 @@ function loadPreferences() {
 function persistPreferences() {
   localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(state.settings));
   localStorage.setItem(STORAGE_KEYS.keybindings, JSON.stringify(input.bindings));
+}
+
+function getPrimaryBind(action) {
+  const b = input.bindings[action] || DEFAULT_BINDINGS[action] || [];
+  return b[0] || (DEFAULT_BINDINGS[action] || [])[0] || '';
+}
+
+function keyHint(action) {
+  return friendlyCodeLabel(getPrimaryBind(action));
+}
+
+function refreshPauseState() {
+  state.paused = !!(state.pauseFlags.overlay || state.pauseFlags.modal);
 }
 
 function wrapAxis(v, max) {
@@ -929,7 +944,7 @@ function drawHouseInterior() {
   ctx.fillStyle = '#7c3f11';
   ctx.fillRect(canvas.width / 2 - 40, canvas.height - 30, 80, 20);
   ctx.fillStyle = '#1f2937';
-  ctx.fillText('E: 집 나가기 · IJKL 이동 · T 회전 · Tab 전환', canvas.width / 2 - 180, canvas.height - 40);
+  ctx.fillText(`${keyHint('interact')}: 집 나가기 · IJKL 이동 · T 회전 · Tab 전환`, canvas.width / 2 - 180, canvas.height - 40);
 
   state.house.furniture.forEach((f, i) => {
     const x = 200 + f.gx * 80;
@@ -1911,8 +1926,15 @@ function openModal(title, html) {
   ui.modalTitle.textContent = title;
   ui.modalBody.innerHTML = html;
   ui.modal.classList.remove('hidden');
+  state.pauseFlags.modal = true;
+  refreshPauseState();
 }
-function closeModal() { ui.modal.classList.add('hidden'); }
+function closeModal() {
+  ui.modal.classList.add('hidden');
+  state.pauseFlags.modal = false;
+  refreshPauseState();
+}
+function isModalOpen() { return !ui.modal.classList.contains('hidden'); }
 
 
 function isOverlayOpen() {
@@ -1970,13 +1992,15 @@ function pushScreen(name, payload = {}) {
   if (!builder) return;
   const screen = builder(payload);
   state.uiStack.push({ name, ...screen });
-  state.paused = true;
+  state.pauseFlags.overlay = true;
+  refreshPauseState();
   renderOverlay();
 }
 
 function popScreen() {
   state.uiStack.pop();
-  if (state.uiStack.length === 0) state.paused = false;
+  state.pauseFlags.overlay = state.uiStack.length > 0;
+  refreshPauseState();
   renderOverlay();
 }
 
@@ -1988,7 +2012,8 @@ function replaceScreen(name, payload = {}) {
 function togglePauseMenu() {
   if (isOverlayOpen()) {
     state.uiStack = [];
-    state.paused = false;
+    state.pauseFlags.overlay = false;
+    refreshPauseState();
     renderOverlay();
   } else {
     pushScreen('pauseMenu');
@@ -2281,8 +2306,7 @@ function bindModalActions() {
         }
       }
 
-      state.uiDirty = true;
-  updateUI();
+      updateUI();
       saveGame();
     });
   });
@@ -3401,6 +3425,12 @@ function setupOverlayEvents() {
   });
 }
 
+function updateActionLabels() {
+  if (ui.btnShop) ui.btnShop.textContent = `🛒 상점(${keyHint('interact')} 근처 입장)`;
+  if (ui.btnMuseum) ui.btnMuseum.textContent = `🏛️ 박물관(${keyHint('interact')} 근처 입장)`;
+  if (ui.btnMap) ui.btnMap.textContent = `🗺️ 지도(${keyHint('openMap')})`;
+}
+
 function syncRenderSurface() {
   const enable3D = state.renderMode === '3d' && !state.house.inside;
   canvas.classList.toggle('hidden', enable3D);
@@ -3424,8 +3454,6 @@ function renderMiniMapHtml(size = 180) {
 
 function updateUI() {
   const now = performance.now();
-  if (!state.uiDirty && now - state.lastUiUpdate < 100) return;
-  state.lastUiUpdate = now;
   window.__renderStats = {
     textures: { ...render3d.textureStats },
     models: { ...render3d.modelStats },
@@ -3457,28 +3485,36 @@ function updateUI() {
   const controls = document.querySelector('.controls');
   if (controls) {
     controls.innerHTML = [
-      `이동: ${friendlyCodeLabel(input.bindings.moveUp?.[0])}/${friendlyCodeLabel(input.bindings.moveDown?.[0])}/${friendlyCodeLabel(input.bindings.moveLeft?.[0])}/${friendlyCodeLabel(input.bindings.moveRight?.[0])}`,
-      `상호작용: ${friendlyCodeLabel(input.bindings.interact?.[0])}`,
-      `낚시/타이밍: ${friendlyCodeLabel(input.bindings.fish?.[0])}`,
-      `지도: ${friendlyCodeLabel(input.bindings.openMap?.[0])}`,
-      `3D 카메라: ${friendlyCodeLabel(input.bindings.camRotateLeft?.[0])}/${friendlyCodeLabel(input.bindings.camRotateRight?.[0])}, ${friendlyCodeLabel(input.bindings.camZoomIn?.[0])}/${friendlyCodeLabel(input.bindings.camZoomOut?.[0])}`,
-      `메뉴: ${friendlyCodeLabel(input.bindings.pauseMenu?.[0])}`,
+      `이동: ${keyHint('moveUp')}/${keyHint('moveDown')}/${keyHint('moveLeft')}/${keyHint('moveRight')}`,
+      `상호작용: ${keyHint('interact')}`,
+      `낚시/타이밍: ${keyHint('fish')}`,
+      `지도: ${keyHint('openMap')}`,
+      `3D 카메라: ${keyHint('camRotateLeft')}/${keyHint('camRotateRight')}, ${keyHint('camZoomIn')}/${keyHint('camZoomOut')}`,
+      `메뉴: ${keyHint('pauseMenu')}`,
     ].map((t) => `<li>${t}</li>`).join('');
   }
-  if (ui.worldMapMini && (now - state.lastMiniMapUpdate > 220 || state.uiDirty)) { state.lastMiniMapUpdate = now; state.miniMapCache = renderMiniMapHtml(); ui.worldMapMini.innerHTML = state.miniMapCache; }
+  const playerTile = `${Math.floor(state.player.x / TILE)},${Math.floor(state.player.y / TILE)}`;
+  const npcHash = state.npcs.map((n) => `${Math.floor(n.x / TILE)},${Math.floor(n.y / TILE)}`).join('|');
+  const miniChanged = playerTile !== state.miniMapTracker.player || npcHash !== state.miniMapTracker.npcs;
+  if (miniChanged) { state.miniMapTracker.player = playerTile; state.miniMapTracker.npcs = npcHash; }
+  if (ui.worldMapMini && now - state.lastMiniMapUpdate > 250 && miniChanged) {
+    state.lastMiniMapUpdate = now;
+    state.miniMapCache = renderMiniMapHtml();
+    ui.worldMapMini.innerHTML = state.miniMapCache;
+  }
   const shopDoor = { x: SHOP_PLOT.x + 92, y: SHOP_PLOT.y + 102 };
   const museumDoor = { x: MUSEUM_PLOT.x + 106, y: MUSEUM_PLOT.y + 110 };
   state.prompt = '';
-  if (state.house.tier > 0 && dist(state.player, { x: state.house.doorX, y: state.house.doorY }) < 66) state.prompt = 'E: 집 출입';
-  else if (dist(state.player, shopDoor) < 70) state.prompt = 'E: 상점 이용';
-  else if (dist(state.player, museumDoor) < 74) state.prompt = 'E: 박물관 이용';
-  else if (dist(state.player, FOUNTAIN) < 78) state.prompt = 'E: 분수 축복 받기';
-  else if (dist(state.player, CAMPFIRE) < 82) state.prompt = 'E: 모닥불 휴식';
-  else if (dist(state.player, LOOKOUT) < 78) state.prompt = 'E: 전망대 탐색';
-  else if (dist(state.player, PIER) < 80) state.prompt = 'E: 피어 낚시 버프';
+  if (state.house.tier > 0 && dist(state.player, { x: state.house.doorX, y: state.house.doorY }) < 66) state.prompt = `${keyHint('interact')}: 집 출입`;
+  else if (dist(state.player, shopDoor) < 70) state.prompt = `${keyHint('interact')}: 상점 이용`;
+  else if (dist(state.player, museumDoor) < 74) state.prompt = `${keyHint('interact')}: 박물관 이용`;
+  else if (dist(state.player, FOUNTAIN) < 78) state.prompt = `${keyHint('interact')}: 분수 축복 받기`;
+  else if (dist(state.player, CAMPFIRE) < 82) state.prompt = `${keyHint('interact')}: 모닥불 휴식`;
+  else if (dist(state.player, LOOKOUT) < 78) state.prompt = `${keyHint('interact')}: 전망대 탐색`;
+  else if (dist(state.player, PIER) < 80) state.prompt = `${keyHint('interact')}: 피어 낚시 버프`;
   else {
     const nearNpc = state.npcs.find((n) => dist(state.player, n) < 82);
-    if (nearNpc) state.prompt = `E: ${nearNpc.name}와 대화`;
+    if (nearNpc) state.prompt = `${keyHint('interact')}: ${nearNpc.name}와 대화`;
   }
 
   ui.message.textContent = state.prompt || (state.msgTimer > 0 ? state.msg : '');
@@ -3486,6 +3522,10 @@ function updateUI() {
     const dbg = state.npcs.map((n) => `${n.name}:${n.state}`).join(' · ');
     ui.message.textContent = `${ui.message.textContent ? `${ui.message.textContent} | ` : ''}DBG ${dbg}`;
   }
+
+  if (now - state.lastUiUpdate < 100) return;
+  state.lastUiUpdate = now;
+  updateActionLabels();
 
   if (state.dialogue) {
     ui.dialogueUi.classList.remove('hidden');
@@ -3495,13 +3535,12 @@ function updateUI() {
       <div class="choices">
         <button data-choice="1">1) ${state.dialogue.a}</button>
         <button data-choice="2">2) ${state.dialogue.b}</button>
-        <button data-choice="0">Esc) 대화 종료</button>
+        <button data-choice="0">${keyHint('pauseMenu')}) 대화 종료</button>
       </div>`;
   } else {
     ui.dialogueUi.classList.add('hidden');
     ui.dialogueUi.innerHTML = '';
   }
-  state.uiDirty = false;
 }
 
 function tick() {
@@ -3510,7 +3549,6 @@ function tick() {
     else if (!state.house.inside) { drawWorld(); state.objects.forEach(drawResource); drawFish(); drawAllCharacters(); }
     else drawHouseInterior();
     syncRenderSurface();
-    state.uiDirty = true;
     updateUI();
     input.justPressed.clear();
     requestAnimationFrame(tick);
@@ -3546,7 +3584,6 @@ function tick() {
   maybeProgressQuest();
   updateCalendar();
   checkAchievements();
-  state.uiDirty = true;
   updateUI();
 
   input.justPressed.clear();
@@ -3607,10 +3644,11 @@ window.addEventListener('keydown', (e) => {
 
   if (input.consume('pauseMenu')) {
     if (state.dialogue) return closeDialogue();
+    if (isModalOpen()) return closeModal();
     if (isOverlayOpen()) return popScreen();
     return pushScreen('pauseMenu');
   }
-  if (isOverlayOpen()) return;
+  if (isOverlayOpen() || isModalOpen()) return;
 
   if (state.dialogue) {
     if (code === 'Digit1') return handleDialogueChoice(1);
@@ -3657,10 +3695,8 @@ ui.btnTown.addEventListener('click', openTownBoard);
 ui.btnMuseum.addEventListener('click', openMuseum);
 ui.btnMap?.addEventListener('click', openWorldMap);
 ui.btnStyle?.addEventListener('click', toggleRenderStyle);
-ui.btnShop.textContent = '🛒 상점(E 근처 입장)';
-ui.btnMuseum.textContent = '🏛️ 박물관(E 근처 입장)';
-if (ui.btnMap) ui.btnMap.textContent = '🗺️ 지도';
 if (ui.btnStyle) ui.btnStyle.textContent = '🎨 동숲 스타일';
+updateActionLabels();
 ui.modalClose.addEventListener('click', closeModal);
 ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModal(); });
 ui.dialogueUi.addEventListener('click', (e) => {
