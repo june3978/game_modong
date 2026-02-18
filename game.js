@@ -244,6 +244,8 @@ const state = {
     uiScale: 1,
     renderScale2D: 1,
     hudDensity: 'normal',
+    cameraNear: 0.05,
+    cameraFar: 320,
   },
 };
 
@@ -2192,6 +2194,8 @@ function pushScreen(name, payload = {}) {
       <div class="overlay-row"><span>2D Render Scale</span><button data-ui="rs2dDown">-</button><span>${(state.settings.renderScale2D || 1).toFixed(2)}</span><button data-ui="rs2dUp">+</button></div>
       <div class="overlay-row"><span>3D Render Scale</span><button data-ui="rs3dDown">-</button><span>${(state.settings.pixelRatioCap || 1).toFixed(2)}</span><button data-ui="rs3dUp">+</button></div>
       <div class="overlay-row"><span>HUD Density</span><button data-ui="toggleHudDensity">${state.settings.hudDensity === 'compact' ? 'Compact' : 'Normal'}</button></div>
+      <div class="overlay-row"><span>Camera Near</span><button data-ui="nearDown">-</button><span>${(state.settings.cameraNear || 0.05).toFixed(2)}</span><button data-ui="nearUp">+</button></div>
+      <div class="overlay-row"><span>Camera Far</span><button data-ui="farDown">-</button><span>${Math.round(state.settings.cameraFar || 320)}</span><button data-ui="farUp">+</button></div>
       <div class="overlay-actions"><button data-ui="back" class="secondary">뒤로</button></div>` }),
     graphics: () => ({ title: '🖥️ 그래픽', html: `
       <div class="overlay-actions">
@@ -2263,6 +2267,10 @@ function handleOverlayAction(action, btn) {
   if (action === 'rs3dUp') { state.settings.pixelRatioCap = clamp((state.settings.pixelRatioCap || 1) + 0.05, 0.75, 2.0); applyGraphicsSettings(); persistPreferences(); return replaceScreen('settings'); }
   if (action === 'rs3dDown') { state.settings.pixelRatioCap = clamp((state.settings.pixelRatioCap || 1) - 0.05, 0.75, 2.0); applyGraphicsSettings(); persistPreferences(); return replaceScreen('settings'); }
   if (action === 'toggleHudDensity') { state.settings.hudDensity = state.settings.hudDensity === 'compact' ? 'normal' : 'compact'; applyHudDensity(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'nearUp') { state.settings.cameraNear = clamp((state.settings.cameraNear || 0.05) + 0.01, 0.01, 1.0); applyGraphicsSettings(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'nearDown') { state.settings.cameraNear = clamp((state.settings.cameraNear || 0.05) - 0.01, 0.01, 1.0); applyGraphicsSettings(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'farUp') { state.settings.cameraFar = clamp((state.settings.cameraFar || 320) + 10, 120, 1200); applyGraphicsSettings(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'farDown') { state.settings.cameraFar = clamp((state.settings.cameraFar || 320) - 10, 120, 1200); applyGraphicsSettings(); persistPreferences(); return replaceScreen('settings'); }
   if (action === 'preset') { applyGraphicsPreset(btn.dataset.preset || 'medium'); return replaceScreen('graphics'); }
   if (action === 'resetBinds') { input.bindings = JSON.parse(JSON.stringify(DEFAULT_BINDINGS)); persistPreferences(); return replaceScreen('keybinds'); }
   if (action === 'rebind') {
@@ -2752,14 +2760,15 @@ function makeFlatTexture(hex = '#808080', repeat = [1, 1], colorSpace = THREE.No
 
 function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08a', opts = {}) {
   const { kind = 'color', anisotropy = 4 } = opts;
+  const texKind = kind === 'color' ? 'color' : 'data';
   const urls = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
   let fallback;
-  if (kind === 'normal') fallback = makeFlatTexture('#8080ff', repeat, THREE.NoColorSpace);
-  else if (kind === 'roughness' || kind === 'data') fallback = makeFlatTexture('#d9d9d9', repeat, THREE.NoColorSpace);
+  if (opts.fallbackMap === 'normal') fallback = makeFlatTexture('#8080ff', repeat, THREE.NoColorSpace);
+  else if (texKind === 'data') fallback = makeFlatTexture('#d9d9d9', repeat, THREE.NoColorSpace);
   else fallback = createNoiseTexture(fallbackColor, '#6d826d', 128, 0.12);
   fallback.wrapS = fallback.wrapT = THREE.RepeatWrapping;
   fallback.repeat.set(repeat[0], repeat[1]);
-  if (kind === 'color') fallback.colorSpace = THREE.SRGBColorSpace;
+  if (texKind === 'color') fallback.colorSpace = THREE.SRGBColorSpace;
   else fallback.colorSpace = THREE.NoColorSpace;
   const loader = new THREE.TextureLoader();
   loader.setCrossOrigin('anonymous');
@@ -2773,7 +2782,7 @@ function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08
       (tex) => {
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
         tex.repeat.set(repeat[0], repeat[1]);
-        tex.colorSpace = kind === 'color' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        tex.colorSpace = texKind === 'color' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
         tex.anisotropy = anisotropy;
         fallback.image = tex.image;
         fallback.needsUpdate = true;
@@ -2794,8 +2803,8 @@ function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08
 function createPBRTextureSet(basePath, repeat = [1, 1], fallbackColor = '#8aa08a') {
   return {
     map: createRemoteTexture(`${basePath}_diff_1k.jpg`, repeat, fallbackColor, { kind: 'color' }),
-    normalMap: createRemoteTexture(`${basePath}_nor_gl_1k.jpg`, repeat, '#7f7fff', { kind: 'normal' }),
-    roughnessMap: createRemoteTexture(`${basePath}_rough_1k.jpg`, repeat, '#bcbcbc', { kind: 'roughness' }),
+    normalMap: createRemoteTexture(`${basePath}_nor_gl_1k.jpg`, repeat, '#7f7fff', { kind: 'data', fallbackMap: 'normal' }),
+    roughnessMap: createRemoteTexture(`${basePath}_rough_1k.jpg`, repeat, '#bcbcbc', { kind: 'data' }),
   };
 }
 
@@ -2868,7 +2877,7 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
     'assets/pbr/water_normal.jpg',
     generatedWaterNormal.image.toDataURL('image/png'),
     'https://threejs.org/examples/textures/waternormals.jpg',
-  ], [6, 6], '#7f7fff', { kind: 'normal' });
+  ], [6, 6], '#7f7fff', { kind: 'data', fallbackMap: 'normal' });
 
   const grassPBR = {
     map: createRemoteTexture([
@@ -2882,12 +2891,12 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
       'assets/pbr/grass_normal.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_nor_gl_1k.jpg',
       'https://threejs.org/examples/textures/terrain/grasslight-big-nm.jpg',
-    ], [12, 12], '#7f7fff', { kind: 'normal' }),
+    ], [12, 12], '#7f7fff', { kind: 'data', fallbackMap: 'normal' }),
     roughnessMap: createRemoteTexture([
       'assets/pbr/grass_rough.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_rough_1k.jpg',
       'https://threejs.org/examples/textures/terrain/grasslight-big.jpg',
-    ], [12, 12], '#bcbcbc', { kind: 'roughness' }),
+    ], [12, 12], '#bcbcbc', { kind: 'data' }),
   };
 
   const woodPBR = {
@@ -2902,13 +2911,13 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
       'assets/pbr/wood_normal.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_nor_gl_1k.jpg',
       'https://threejs.org/examples/textures/hardwood2_bump.jpg',
-    ], [4, 4], '#7f7fff', { kind: 'normal' }),
+    ], [4, 4], '#7f7fff', { kind: 'data', fallbackMap: 'normal' }),
     roughnessMap: createRemoteTexture([
       'assets/stylized/dirt_color.png',
       'assets/pbr/wood_rough.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_rough_1k.jpg',
       'https://threejs.org/examples/textures/hardwood2_roughness.jpg',
-    ], [4, 4], '#bcbcbc', { kind: 'roughness' }),
+    ], [4, 4], '#bcbcbc', { kind: 'data' }),
   };
 
   const make = (pbrOpts, toonColor) => (isToon
@@ -3361,7 +3370,7 @@ function buildThreeWorld() {
   const pondH = WATER.y2 - WATER.y1 - 1;
   const water = new THREE.Mesh(new THREE.PlaneGeometry(pondW, pondH), mats.water);
   water.rotation.x = -Math.PI / 2;
-  water.position.set((WATER.x1 + WATER.x2) / 2 - MAP_W / 2, 0.15, (WATER.y1 + WATER.y2) / 2 - MAP_H / 2);
+  water.position.set((WATER.x1 + WATER.x2) / 2 - MAP_W / 2, 0.24, (WATER.y1 + WATER.y2) / 2 - MAP_H / 2);
   water.receiveShadow = true;
   applyWaterRenderState(water);
   render3d.water = water;
@@ -3538,7 +3547,7 @@ async function ensure3DWorld() {
     scene.background = new THREE.Color('#9ad2ff');
     scene.fog = new THREE.Fog('#a5d8ff', 26, 95);
 
-    const camera = new THREE.PerspectiveCamera(55, 16 / 9, 0.08, 280);
+    const camera = new THREE.PerspectiveCamera(55, 16 / 9, state.settings.cameraNear || 0.05, state.settings.cameraFar || 320);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
     renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, state.settings.pixelRatioCap || 1.5));
     renderer.shadowMap.enabled = true;
@@ -3689,7 +3698,7 @@ function sync3DEntities() {
       render3d.mats.waterNormal.offset.x = state.time * 0.0007;
       render3d.mats.waterNormal.offset.y = state.time * 0.00045;
     }
-    render3d.water.position.y = 0.13 + Math.sin(state.time * 0.02) * 0.03;
+    render3d.water.position.y = 0.24 + Math.sin(state.time * 0.02) * 0.015;
     applyWaterRenderState(render3d.water);
   }
 }
@@ -3987,7 +3996,8 @@ function updateUI() {
   if (state.debugRenderInfo && render3d.camera) {
     const wd = render3d.waterDebug || {};
     const waterPos = render3d.water?.position ? `${render3d.water.position.x.toFixed(2)},${render3d.water.position.y.toFixed(2)},${render3d.water.position.z.toFixed(2)}` : 'none';
-    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | YAW p:${(state.player.yaw||0).toFixed(2)} t:${(state.player.targetYaw||0).toFixed(2)} off:${(state.modelForwardOffsetYaw||0).toFixed(2)} spd:${(state.player.speed3D||0).toFixed(2)} | TXF:${render3d.textureFailureUrls.length} MDF:${render3d.modelFailureUrls.length}`;
+    const camDist = render3d.camera.position.distanceTo(new THREE.Vector3(state.player.x / TILE - MAP_W / 2, 0, state.player.y / TILE - MAP_H / 2));
+    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} d:${camDist.toFixed(2)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | YAW p:${(state.player.yaw||0).toFixed(2)} t:${(state.player.targetYaw||0).toFixed(2)} off:${(state.modelForwardOffsetYaw||0).toFixed(2)} spd:${(state.player.speed3D||0).toFixed(2)} | TXF:${render3d.textureFailureUrls.length} MDF:${render3d.modelFailureUrls.length}`;
     ui.message.textContent = `${ui.message.textContent ? `${ui.message.textContent} | ` : ''}${dbg}`;
   }
 
@@ -4245,6 +4255,11 @@ function applyGraphicsSettings() {
   render3d.renderer.shadowMap.enabled = !!state.settings.shadows;
   if (render3d.sun?.shadow?.mapSize) render3d.sun.shadow.mapSize.set(state.settings.shadowMapSize || 2048, state.settings.shadowMapSize || 2048);
   render3d.usePostFX = !!state.settings.postFX && !!render3d.composer;
+  if (render3d.camera) {
+    render3d.camera.near = clamp(state.settings.cameraNear || 0.05, 0.01, 1.0);
+    render3d.camera.far = clamp(state.settings.cameraFar || 320, 120, 1200);
+    render3d.camera.updateProjectionMatrix();
+  }
   if (render3d.rain?.geometry?.attributes?.position) {
     const nextCount = clamp(Math.floor(state.settings.rainCount || 900), 200, 2000);
     const prevCount = render3d.rain.geometry.attributes.position.count || 0;
