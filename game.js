@@ -224,6 +224,8 @@ const state = {
   barterOffers: {},
   dialoguePools: {},
   npcMemories: {},
+  recentGlobalLines: [],
+  dialogueDebug: false,
   debugPaths: false,
   debugRenderInfo: false,
   renderStyle: 'pbr',
@@ -473,98 +475,298 @@ function wrappedPointNear(ref, pt) {
 
 
 
-function buildDialoguePool(name, traits = []) {
-  const moods = ['반짝이는', '포근한', '고요한', '싱그러운', '은은한', '설레는'];
-  const places = ['광장', '해안', '연못', '숲길', '농장', '전망대'];
-  const actions = ['산책하고', '낚시하고', '꽃을 돌보고', '장작을 모으고', '별을 보고', '차를 마시고'];
-  const endings = ['기분이 좋아졌어.', '하루가 꽉 찬 느낌이야.', '오늘은 행운이 따를 것 같아.', '마을이 더 사랑스러워 보여.', '네가 있어서 든든해.', '조금 더 용기가 생겼어.'];
-  const topics = ['집 꾸미기', '새 이웃 이야기', '시장 소식', '박물관 전시', '계절 이벤트', '비밀 스팟'];
-  const pool = [];
+const DIALOGUE_TEMPLATES = {
+  greetings: [
+    { text: '안녕! 오늘 분위기 정말 좋다.', tags: ['neutral'] },
+    { text: '좋은 아침이야, 오늘은 천천히 시작하자.', tags: ['time:morning'] },
+    { text: '점심 햇살이 반짝여서 기분이 들떠.', tags: ['time:noon', 'weather:clear'] },
+    { text: '저녁 공기가 부드러워서 산책하고 싶어.', tags: ['time:evening'] },
+    { text: '밤 공기 조용해서 이야기하기 딱 좋아.', tags: ['time:night'] },
+    { text: '비 소리 들으면서 얘기하면 더 차분해져.', tags: ['weather:rain'] },
+    { text: '하늘이 맑아서 마음도 환해졌어.', tags: ['weather:clear'] },
+    { text: '봄에는 작은 변화도 크게 느껴져.', tags: ['season:spring'] },
+    { text: '여름엔 움직일수록 활기가 올라와.', tags: ['season:summer'] },
+    { text: '가을엔 생각이 깊어져서 대화가 좋아.', tags: ['season:autumn'] },
+    { text: '겨울엔 따뜻한 말 한마디가 더 소중해.', tags: ['season:winter'] },
+    { text: '오늘도 너 만나서 반가워!', tags: ['neutral'] },
+  ],
+  weather: [
+    { text: '바닥이 촉촉해서 꽃향기가 더 진해.', tags: ['weather:rain'] },
+    { text: '햇빛 덕분에 마을 색이 더 선명해 보여.', tags: ['weather:clear'] },
+    { text: '비 오는 날은 조금 천천히 걷게 돼.', tags: ['weather:rain'] },
+    { text: '맑은 날엔 멀리까지 시야가 열려서 좋아.', tags: ['weather:clear'] },
+    { text: '오늘 날씨가 딱 적당해서 움직이기 편해.', tags: ['neutral'] },
+    { text: '우산 없어도 괜찮은 하늘이라 마음이 가벼워.', tags: ['weather:clear'] },
+    { text: '빗방울이 지붕에 닿는 소리가 은근 좋아.', tags: ['weather:rain'] },
+    { text: '날씨가 어떤 날이든 네 페이스가 중요해.', tags: ['neutral'] },
+  ],
+  activities: [
+    { text: '광장 한 바퀴 돌면서 사람들 표정 구경했어.', tags: ['neutral'] },
+    { text: '분수 근처에서 잠깐 멍 때렸는데 힐링됐어.', tags: ['neutral'] },
+    { text: '농장 쪽은 오늘도 손이 바쁘더라.', tags: ['time:noon', 'time:morning'] },
+    { text: '밤 산책하면서 불빛 패턴 보는 게 재밌어.', tags: ['time:night'] },
+    { text: '피어 쪽에서 물결 소리 듣고 왔어.', tags: ['weather:clear', 'weather:rain'] },
+    { text: '박물관 게시판을 보다가 시간 가는 줄 몰랐어.', tags: ['neutral'] },
+    { text: '겨울엔 모닥불 근처가 제일 인기야.', tags: ['season:winter'] },
+    { text: '여름엔 그늘 많은 길을 골라 다니게 돼.', tags: ['season:summer'] },
+    { text: '가을엔 수집 욕심이 괜히 커지더라.', tags: ['season:autumn'] },
+    { text: '봄엔 작은 잎 하나도 반갑게 보이네.', tags: ['season:spring'] },
+    { text: '비 올 때는 실내 정리할 게 많아져.', tags: ['weather:rain'] },
+    { text: '요즘은 대화하는 시간이 제일 재밌어.', tags: ['neutral'] },
+  ],
+  emotions: [
+    { text: '괜히 자신감이 조금 올라왔어.', tags: ['friendship:high', 'neutral'] },
+    { text: '오늘은 차분하게 하루를 정리하고 싶어.', tags: ['neutral'] },
+    { text: '덕분에 마음이 한결 가벼워졌어.', tags: ['friendship:mid', 'friendship:high'] },
+    { text: '조금 지쳤는데 대화하니 회복되는 느낌이야.', tags: ['neutral'] },
+    { text: '비 오는 날은 감정도 잔잔해져.', tags: ['weather:rain'] },
+    { text: '맑은 날엔 뭐든 해낼 수 있을 것 같아.', tags: ['weather:clear'] },
+    { text: '우리가 점점 편해지는 게 느껴져.', tags: ['friendship:high'] },
+    { text: '천천히 친해져도 괜찮다고 생각해.', tags: ['friendship:low', 'friendship:mid'] },
+  ],
+  closers: [
+    { text: '너랑 얘기하면 하루가 정돈돼.', tags: ['neutral'] },
+    { text: '다음에 만나면 이어서 얘기하자.', tags: ['neutral'] },
+    { text: '오늘은 여기까지, 고마워.', tags: ['neutral'] },
+    { text: '이 분위기 오래 기억하고 싶다.', tags: ['time:evening', 'time:night'] },
+    { text: '지금 타이밍에 대화해서 다행이야.', tags: ['neutral'] },
+    { text: '비 그치면 같이 산책해도 좋겠다.', tags: ['weather:rain'] },
+    { text: '맑은 날 다시 만나면 더 재밌을 것 같아.', tags: ['weather:clear'] },
+    { text: '계절이 바뀌면 또 다른 얘기가 생기겠지.', tags: ['season:spring', 'season:summer', 'season:autumn', 'season:winter'] },
+  ],
+};
 
-  for (const mood of moods) {
-    for (const place of places) {
-      for (const action of actions) {
-        const end = endings[(pool.length + action.length + place.length) % endings.length];
-        const topic = topics[(pool.length + name.length) % topics.length];
-        const trait = traits[pool.length % Math.max(1, traits.length)] || '따뜻한';
-        pool.push(`${name}: ${mood} ${place}에서 ${action} 보니까 ${end} (${trait} 취향 / ${topic})`);
-      }
-    }
-  }
-  // 6*6*6 = 216 lines
-  return pool;
+const NPC_SPEECH_STYLES = {
+  luna: ['반짝', '있지', '리듬 타듯이'],
+  bomi: ['수확각', '차근차근', '성실 모드'],
+  maru: ['파도감성', '낚시각', '후우'],
+  nari: ['기록해둘게', '흥미롭네', '관찰 완료'],
+  toto: ['좋다!', '모험각', '레츠고'],
+  pipi: ['센스있네', '무드 좋아', '완전 취향'],
+};
+
+function getSeasonTag() {
+  const sname = SEASONS[state.season] || '봄';
+  if (sname === '봄') return 'spring';
+  if (sname === '여름') return 'summer';
+  if (sname === '가을') return 'autumn';
+  return 'winter';
 }
 
-function initDialoguePools() {
-  const traitMap = {
-    luna: ['음악', '꽃', '산책', '디자인'],
-    bomi: ['농사', '수집', '요리', '정원'],
-    maru: ['낚시', '연못', '캠핑', '파도'],
-    nari: ['책', '박물관', '사진', '공예'],
-    toto: ['장난감', '시장', '요리', '모험'],
-    pipi: ['날씨', '해안', '패션', '잡화'],
+function getFriendshipTier(npcId) {
+  const v = state.relationships[npcId] || 0;
+  if (v >= 65) return 'high';
+  if (v >= 35) return 'mid';
+  return 'low';
+}
+
+function buildDialogueContext(npc) {
+  return {
+    timeBucket: getDaySlot(),
+    weather: state.weather === 'rainy' ? 'rain' : 'clear',
+    season: getSeasonTag(),
+    npcTrait: (npc.traits?.poi || ['village'])[0],
+    friendshipTier: getFriendshipTier(npc.id),
+    lastEvent: state.dailyEvent || 'none',
   };
-  state.dialoguePools = {};
-  state.npcs.forEach((n) => {
-    if (!state.npcMemories[n.id]) state.npcMemories[n.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
-    state.dialoguePools[n.id] = buildDialoguePool(n.name, traitMap[n.id] || ['일상']);
-  });
 }
 
-function getDialogueLine(npc) {
-  const pool = state.dialoguePools[npc.id] || [];
-  if (!pool.length) return `${npc.name}: 무슨 이야기 할까?`;
-  const idx = (state.day * 17 + Math.floor(state.time / 40) + npc.name.length * 13 + Math.floor(Math.random() * 11)) % pool.length;
-  return pool[idx];
+function tagsMatchContext(tags = [], context) {
+  const tagList = Array.isArray(tags) ? tags : [];
+  const check = (prefix, value) => {
+    const scoped = tagList.filter((t) => t.startsWith(`${prefix}:`)).map((t) => t.split(':')[1]);
+    if (!scoped.length) return true;
+    return scoped.includes(value);
+  };
+  return check('time', context.timeBucket)
+    && check('weather', context.weather)
+    && check('season', context.season)
+    && check('friendship', context.friendshipTier);
 }
 
 function getNpcMemory(npc) {
-  if (!state.npcMemories[npc.id]) state.npcMemories[npc.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
-  return state.npcMemories[npc.id];
+  if (!state.npcMemories[npc.id]) {
+    state.npcMemories[npc.id] = { history: [], facts: {}, affinity: 0, lastTopic: '', recentLines: [], openingDay: -1, openingLine: '' };
+  }
+  const mem = state.npcMemories[npc.id];
+  if (!Array.isArray(mem.history)) mem.history = [];
+  if (!Array.isArray(mem.recentLines)) mem.recentLines = [];
+  if (typeof mem.openingDay !== 'number') mem.openingDay = -1;
+  if (typeof mem.openingLine !== 'string') mem.openingLine = '';
+  return mem;
+}
+
+function rememberDialogueLine(npc, line, opening = false) {
+  const mem = getNpcMemory(npc);
+  mem.recentLines.unshift(line);
+  mem.recentLines = mem.recentLines.slice(0, 20);
+  if (!Array.isArray(state.recentGlobalLines)) state.recentGlobalLines = [];
+  state.recentGlobalLines.unshift(line);
+  state.recentGlobalLines = state.recentGlobalLines.slice(0, 30);
+  if (opening) {
+    mem.openingDay = state.day;
+    mem.openingLine = line;
+  }
+}
+
+function pickTaggedFragment(list, context, npc, { neutralOnly = false, opening = false } = {}) {
+  const mem = getNpcMemory(npc);
+  const source = neutralOnly ? list.filter((e) => (e.tags || []).includes('neutral')) : list;
+  const matched = source.filter((e) => tagsMatchContext(e.tags, context));
+  const recentNpc = new Set(mem.recentLines || []);
+  const recentGlobal = new Set(state.recentGlobalLines || []);
+  let candidates = matched.filter((e) => !recentNpc.has(e.text) && !recentGlobal.has(e.text));
+
+  if (opening && mem.openingDay === state.day && mem.openingLine) {
+    candidates = candidates.filter((e) => e.text !== mem.openingLine);
+  }
+
+  if (!candidates.length) candidates = matched;
+  if (!candidates.length && !neutralOnly) {
+    return pickTaggedFragment(list, context, npc, { neutralOnly: true, opening });
+  }
+  if (!candidates.length) return { text: '오늘은 조용히 같이 걷자.', tags: ['neutral'] };
+  return candidates[Math.floor(Math.random() * candidates.length)];
+}
+
+function composeContextDialogue(npc, context, { opening = false } = {}) {
+  const greet = pickTaggedFragment(DIALOGUE_TEMPLATES.greetings, context, npc, { opening });
+  const weather = pickTaggedFragment(DIALOGUE_TEMPLATES.weather, context, npc);
+  const activity = pickTaggedFragment(DIALOGUE_TEMPLATES.activities, context, npc);
+  const emotion = pickTaggedFragment(DIALOGUE_TEMPLATES.emotions, context, npc);
+  const closer = pickTaggedFragment(DIALOGUE_TEMPLATES.closers, context, npc);
+  const habits = NPC_SPEECH_STYLES[npc.id] || ['음', '좋네'];
+  const tic = habits[Math.floor(Math.random() * habits.length)];
+  const line = `${npc.name}: ${greet.text} ${weather.text} ${activity.text} ${emotion.text} ${closer.text} (${tic})`;
+  const debug = {
+    context,
+    tags: { greet: greet.tags, weather: weather.tags, activity: activity.tags, emotion: emotion.tags, closer: closer.tags },
+  };
+  rememberDialogueLine(npc, line, opening);
+  return { line, debug };
+}
+
+function estimateDialogueVariationCount() {
+  const times = ['morning', 'noon', 'evening', 'night'];
+  const weathers = ['rain', 'clear'];
+  const seasons = ['spring', 'summer', 'autumn', 'winter'];
+  const friends = ['low', 'mid', 'high'];
+  let total = 0;
+  for (const timeBucket of times) {
+    for (const weather of weathers) {
+      for (const season of seasons) {
+        for (const friendshipTier of friends) {
+          const ctx = { timeBucket, weather, season, friendshipTier, npcTrait: 'village', lastEvent: 'none' };
+          const g = DIALOGUE_TEMPLATES.greetings.filter((e) => tagsMatchContext(e.tags, ctx)).length;
+          const w = DIALOGUE_TEMPLATES.weather.filter((e) => tagsMatchContext(e.tags, ctx)).length;
+          const a = DIALOGUE_TEMPLATES.activities.filter((e) => tagsMatchContext(e.tags, ctx)).length;
+          const e = DIALOGUE_TEMPLATES.emotions.filter((x) => tagsMatchContext(x.tags, ctx)).length;
+          const c = DIALOGUE_TEMPLATES.closers.filter((x) => tagsMatchContext(x.tags, ctx)).length;
+          total += g * w * a * e * c * 3;
+        }
+      }
+    }
+  }
+  return total;
+}
+
+function initDialoguePools() {
+  state.dialoguePools = {};
+  if (!Array.isArray(state.recentGlobalLines)) state.recentGlobalLines = [];
+  state.npcs.forEach((n) => {
+    if (!state.npcMemories[n.id]) state.npcMemories[n.id] = { history: [], facts: {}, affinity: 0, lastTopic: '', recentLines: [] };
+    state.dialoguePools[n.id] = { style: NPC_SPEECH_STYLES[n.id] || ['차분히'] };
+  });
+  const variationCount = estimateDialogueVariationCount();
+  console.log(`[dialogue] combinational variation count = ${variationCount}`);
+}
+
+function getDialogueLine(npc, context = buildDialogueContext(npc), opts = {}) {
+  return composeContextDialogue(npc, context, opts);
 }
 
 function pushNpcMemory(npc, topic, playerAnswer, npcReply, moodDelta = 0) {
   const mem = getNpcMemory(npc);
   mem.lastTopic = topic;
   mem.affinity = clamp((mem.affinity || 0) + moodDelta, -50, 120);
-  mem.history = Array.isArray(mem.history) ? mem.history : [];
-  mem.history.unshift({ day: state.day, topic, playerAnswer, npcReply });
-  mem.history = mem.history.slice(0, 16);
+  mem.history.unshift({ day: state.day, topic, playerAnswer, npcReply, context: buildDialogueContext(npc) });
+  mem.history = mem.history.slice(0, 24);
   if (topic) mem.facts[topic] = playerAnswer;
 }
 
 function getMemoryInfluencedLine(npc) {
   const mem = getNpcMemory(npc);
+  const context = buildDialogueContext(npc);
   if (mem.history?.length) {
     const recent = mem.history[0];
-    return `${npc.name}: 지난번에 '${recent.topic}' 얘기했던 거 기억해. 네가 '${recent.playerAnswer}'라고 했지?`;
+    const line = `${npc.name}: 지난번 '${recent.topic}' 얘기 기억해. 네가 '${recent.playerAnswer}'라고 했지. 오늘(${context.timeBucket}/${context.weather}/${context.season}) 기준으로 다시 보면 어때?`;
+    rememberDialogueLine(npc, line, false);
+    return { line, debug: { context, tags: { memory: ['neutral'] } } };
   }
-  return getDialogueLine(npc);
+  return getDialogueLine(npc, context);
 }
 
-function setDialogueNode(npc, node, line, options) {
-  state.dialogue = { npc, node, line, options };
+function setDialogueNode(npc, node, line, options, debugInfo = null, graph = null) {
+  state.dialogue = { npc, node, line, options, debugInfo, graph };
   npc.talk = line;
 }
 
+function buildFollowupOptions() {
+  return [
+    { id: 'askTopic', label: '질문 이어가기' },
+    { id: 'request', label: '부탁/교환 이야기' },
+    { id: 'recall', label: '지난 이야기 꺼내기' },
+    { id: 'end', label: '대화 종료' },
+  ];
+}
+
+function buildDynamicDialogueGraph(npc, context) {
+  const turns = 2 + Math.floor(Math.random() * 3); // 2~4 turns
+  const graph = { nodes: {} };
+  graph.nodes.root = {
+    id: 'root',
+    getLine: () => getDialogueLine(npc, context, { opening: true }),
+    options: [
+      { id: 'smalltalk', label: '근황 묻기' },
+      { id: 'askTopic', label: '취향/생각 질문하기' },
+      { id: 'request', label: '요청/교환/선물 이야기' },
+      { id: 'recall', label: '지난 대화 이어가기' },
+      { id: 'graph:chain_0', label: '오늘 기분 깊게 이야기하기' },
+    ],
+  };
+  for (let i = 0; i < turns; i += 1) {
+    graph.nodes[`chain_${i}`] = {
+      id: `chain_${i}`,
+      getLine: () => getDialogueLine(npc, context),
+      options: [
+        ...(i < turns - 1 ? [{ id: `graph:chain_${i + 1}`, label: '계속 듣기' }] : []),
+        { id: 'askTopic', label: '질문으로 전환' },
+        { id: 'request', label: '도움/교환 얘기' },
+        { id: 'end', label: '이야기 마무리' },
+      ],
+    };
+  }
+  return graph;
+}
+
 function openDialogueRoot(npc) {
-  const mem = getNpcMemory(npc);
-  const memoryHint = mem.history?.length ? `지난 대화 ${mem.history[0].topic}` : '처음 만남';
-  setDialogueNode(npc, 'root', `${npc.name}: 오늘은 뭘 이야기해볼까? (${memoryHint})`, [
-    { id: 'smalltalk', label: '근황 묻기' },
-    { id: 'askTopic', label: '취향/생각 질문하기' },
-    { id: 'request', label: '요청/교환/선물 이야기' },
-    { id: 'recall', label: '지난 대화 이어가기' },
-  ]);
+  const context = buildDialogueContext(npc);
+  const graph = buildDynamicDialogueGraph(npc, context);
+  const root = graph.nodes.root;
+  const payload = root.getLine();
+  const optionCount = 3 + Math.floor(Math.random() * 3); // 3~5
+  const opts = root.options.slice(0, optionCount);
+  setDialogueNode(npc, 'root', payload.line, opts, payload.debug, graph);
 }
 
 function openAskTopicMenu(npc) {
+  const context = buildDialogueContext(npc);
   setDialogueNode(npc, 'askTopic', `${npc.name}: 좋아, 어떤 주제가 궁금해?`, [
     { id: 'topic_season', label: '좋아하는 계절은?' },
     { id: 'topic_hobby', label: '요즘 빠진 취미는?' },
     { id: 'topic_food', label: '좋아하는 음식은?' },
     { id: 'topic_back', label: '다른 얘기로 돌아가기' },
-  ]);
+  ], { context, tags: { menu: ['neutral'] } });
 }
 
 function openReactionMenu(npc, topic, npcLine) {
@@ -573,65 +775,66 @@ function openReactionMenu(npc, topic, npcLine) {
     { id: `react_${topic}_cheer`, label: '응원해줄게!' },
     { id: `react_${topic}_joke`, label: '농담으로 분위기 풀기' },
     { id: 'react_back', label: '주제 선택으로 돌아가기' },
-  ]);
+  ], { context: buildDialogueContext(npc), tags: { reaction: ['neutral'] } });
 }
 
 function resolveTopicQuestion(npc, topicId) {
+  const ctx = buildDialogueContext(npc);
   const byId = {
-    topic_season: { topic: '계절', line: `${npc.name}: 난 ${state.weather === 'rainy' ? '비 오는 계절' : '바람 선선한 계절'}이 좋아.` },
-    topic_hobby: { topic: '취미', line: `${npc.name}: 요즘은 ${(npc.traits?.poi || ['산책'])[0]} 관련 일을 자주 해.` },
-    topic_food: { topic: '음식', line: `${npc.name}: 달콤한 베리잼이 최고야.` },
+    topic_season: { topic: '계절', line: `${npc.name}: 난 ${ctx.weather === 'rain' ? '비 오는 날과 잘 맞는 계절' : '햇빛이 부드러운 계절'}을 좋아.` },
+    topic_hobby: { topic: '취미', line: `${npc.name}: 요즘은 ${(npc.traits?.poi || ['산책'])[0]} 관련 시간을 제일 즐겨.` },
+    topic_food: { topic: '음식', line: `${npc.name}: 오늘은 따뜻한 간식이 생각나.` },
   };
   const t = byId[topicId];
-  if (!t) return openAskTopicMenu(npc);
+  if (!t) return;
+  pushNpcMemory(npc, t.topic, '질문', t.line, 1);
   openReactionMenu(npc, t.topic, t.line);
 }
 
-function applyReactionChoice(npc, reactionId, topic) {
-  const mapping = {
-    agree: { text: '맞아, 나도 비슷하게 느껴.', mood: 4, rel: 3 },
-    cheer: { text: '응원해줘서 든든해!', mood: 6, rel: 4 },
-    joke: { text: '하하, 너랑 말하면 웃겨.', mood: 3, rel: 2 },
-  };
-  const key = reactionId.split('_').pop();
-  const data = mapping[key] || mapping.agree;
-  npc.talk = `${npc.name}: ${data.text}`;
-  npc.mood = clamp(npc.mood + data.mood, 0, 100);
-  state.relationships[npc.id] = clamp((state.relationships[npc.id] || 0) + data.rel, 0, 100);
-  pushNpcMemory(npc, topic, key, data.text, data.rel);
-  setDialogueNode(npc, 'followup', `${npc.name}: 계속 이야기할래?`, [
-    { id: 'askTopic', label: '다른 질문 더 하기' },
-    { id: 'smalltalk', label: '가벼운 근황으로' },
-    { id: 'recall', label: '기억 기반으로 이어가기' },
-    { id: 'end', label: '오늘 대화는 여기까지' },
-  ]);
+function applyReactionChoice(npc, actionId, topic) {
+  const ctx = buildDialogueContext(npc);
+  let mood = 0;
+  let answer = '중립';
+  if (actionId.endsWith('_agree')) { mood = 3; answer = '공감'; }
+  else if (actionId.endsWith('_cheer')) { mood = 4; answer = '응원'; }
+  else if (actionId.endsWith('_joke')) { mood = 2; answer = '농담'; }
+  state.relationships[npc.id] = clamp((state.relationships[npc.id] || 0) + mood, 0, 100);
+  const payload = getDialogueLine(npc, ctx);
+  const line = `${payload.line} 네 반응(${answer}) 덕분에 기억에 남았어.`;
+  pushNpcMemory(npc, topic, answer, line, mood);
+  setDialogueNode(npc, 'followup', `${npc.name}: 계속 이야기할래?`, buildFollowupOptions(), payload.debug);
 }
 
 function handleDialogueAction(actionId) {
   if (!state.dialogue) return;
   const n = state.dialogue.npc;
+
+  if (actionId?.startsWith('graph:')) {
+    const nodeId = actionId.split(':')[1];
+    const graph = state.dialogue.graph;
+    if (graph?.nodes?.[nodeId]) {
+      const payload = graph.nodes[nodeId].getLine();
+      const opts = graph.nodes[nodeId].options.slice(0, 3 + Math.floor(Math.random() * 3));
+      return setDialogueNode(n, nodeId, payload.line, opts, payload.debug, graph);
+    }
+  }
+
   if (actionId === 'smalltalk') {
-    const mem = getNpcMemory(n);
-    const extra = mem.lastTopic ? `지난번 ${mem.lastTopic} 얘기 재밌었어.` : '오늘 처음 이야기하는 기분이네.';
-    n.talk = `${getDialogueLine(n)} ${extra}`;
+    const payload = getDialogueLine(n, buildDialogueContext(n));
+    n.talk = payload.line;
     state.coins += 5;
     setMsg(`${n.name}와 담소. 코인 +5`);
-    return setDialogueNode(n, 'followup', `${n.name}: 더 얘기할래?`, [
-      { id: 'askTopic', label: '질문 이어가기' },
-      { id: 'request', label: '부탁/교환 이야기' },
-      { id: 'recall', label: '지난 이야기 꺼내기' },
-      { id: 'end', label: '대화 종료' },
-    ]);
+    return setDialogueNode(n, 'followup', `${n.name}: 더 얘기할래?`, buildFollowupOptions(), payload.debug, state.dialogue.graph);
   }
 
   if (actionId === 'askTopic') return openAskTopicMenu(n);
 
-  if (actionId.startsWith('topic_')) {
+  if (actionId?.startsWith('topic_')) {
     if (actionId === 'topic_back') return openDialogueRoot(n);
     return resolveTopicQuestion(n, actionId);
   }
 
-  if (actionId.startsWith('react_')) {
+  if (actionId?.startsWith('react_')) {
     if (actionId === 'react_back') return openAskTopicMenu(n);
     const parts = actionId.split('_');
     const topic = parts[1] || '주제';
@@ -639,19 +842,9 @@ function handleDialogueAction(actionId) {
   }
 
   if (actionId === 'recall') {
-    const mem = getNpcMemory(n);
-    if (!mem.history?.length) {
-      n.talk = `${n.name}: 아직 깊은 이야기는 못했네. 지금부터 만들어보자!`;
-    } else {
-      const m = mem.history[0];
-      n.talk = `${n.name}: 지난번 '${m.topic}' 이야기에서 네 반응 '${m.playerAnswer}'가 기억나.`;
-    }
-    return setDialogueNode(n, 'followup', `${n.name}: 이 이야기를 더 이어갈까?`, [
-      { id: 'askTopic', label: '질문 더 하기' },
-      { id: 'smalltalk', label: '가벼운 이야기로 전환' },
-      { id: 'request', label: '요청/교환 확인' },
-      { id: 'end', label: '마무리하기' },
-    ]);
+    const payload = getMemoryInfluencedLine(n);
+    n.talk = payload.line;
+    return setDialogueNode(n, 'followup', `${n.name}: 이 이야기를 더 이어갈까?`, buildFollowupOptions(), payload.debug, state.dialogue.graph);
   }
 
   if (actionId === 'request') {
@@ -668,7 +861,8 @@ function handleDialogueAction(actionId) {
     } else {
       const barter = tryNpcBarter(n);
       if (barter.ok) {
-        n.talk = `${getDialogueLine(n)} 방금 교환도 완벽했어.`;
+        const payload = getDialogueLine(n, buildDialogueContext(n));
+        n.talk = `${payload.line} 방금 교환도 완벽했어.`;
         setMsg(barter.msg);
         spawnNpcReactionEffect(n, 'heart');
         pushNpcMemory(n, '교환', '성공', barter.msg, 4);
@@ -685,17 +879,10 @@ function handleDialogueAction(actionId) {
         setMsg(tip);
       }
     }
-    return setDialogueNode(n, 'followup', `${n.name}: 다른 이야기도 해볼래?`, [
-      { id: 'smalltalk', label: '근황 이야기' },
-      { id: 'askTopic', label: '질문하기' },
-      { id: 'recall', label: '기억 이야기' },
-      { id: 'end', label: '종료' },
-    ]);
+    return setDialogueNode(n, 'followup', `${n.name}: 다른 이야기도 해볼래?`, buildFollowupOptions(), { context: buildDialogueContext(n), tags: { request: ['neutral'] } }, state.dialogue.graph);
   }
 
-  if (actionId === 'end') {
-    closeDialogue();
-  }
+  if (actionId === 'end') closeDialogue();
 }
 
 function rollDailyBarterOffers() {
@@ -1399,7 +1586,7 @@ function drawSpeechBubble(actor, text) {
 function drawDialogueChoices() {
   if (!state.dialogue) return;
   const p = worldToScreen(state.player.x, state.player.y);
-  const opts = Array.isArray(state.dialogue.options) ? state.dialogue.options.slice(0, 4) : [];
+  const opts = Array.isArray(state.dialogue.options) ? state.dialogue.options.slice(0, 5) : [];
   const h = Math.max(80, 30 + opts.length * 22);
   ctx.fillStyle = 'rgba(15,23,42,0.86)';
   ctx.fillRect(p.x - 200, p.y + 40, 400, h);
@@ -2144,7 +2331,7 @@ function interact() {
     n.pause = true;
     state.player.facing = facingTo(state.player, n);
     n.facing = facingTo(n, state.player);
-    n.talk = getMemoryInfluencedLine(n);
+    n.talk = getMemoryInfluencedLine(n).line;
     openDialogueRoot(n);
     return;
   }
@@ -4098,7 +4285,9 @@ function updateUI() {
       <div class="choices">
         ${opts.map((opt, i) => `<button data-choice="${i + 1}">${i + 1}) ${opt.label}</button>`).join('')}
         <button data-choice="0">${keyHint('pauseMenu')}) 대화 종료</button>
-      </div>`;
+        <button data-dialogue-debug="toggle">F4 Debug ${state.dialogueDebug ? 'ON' : 'OFF'}</button>
+      </div>
+      ${state.dialogueDebug ? `<pre class="dialogue-debug">${JSON.stringify(state.dialogue.debugInfo || {}, null, 2)}</pre>` : ''}`;
   } else {
     ui.dialogueUi.classList.add('hidden');
     ui.dialogueUi.innerHTML = '';
@@ -4226,6 +4415,8 @@ window.addEventListener('keydown', (e) => {
     if (code === 'Digit2') return handleDialogueChoice(2);
     if (code === 'Digit3') return handleDialogueChoice(3);
     if (code === 'Digit4') return handleDialogueChoice(4);
+    if (code === 'Digit5') return handleDialogueChoice(5);
+    if (code === 'F4') { state.dialogueDebug = !state.dialogueDebug; return; }
   }
 
   if (state.house.inside) {
@@ -4297,6 +4488,7 @@ ui.dialogueUi.addEventListener('click', (e) => {
   else if (c === '2') handleDialogueChoice(2);
   else if (c === '3') handleDialogueChoice(3);
   else if (c === '4') handleDialogueChoice(4);
+  else if (c === '5') handleDialogueChoice(5);
   else closeDialogue();
 });
 
