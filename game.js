@@ -216,7 +216,7 @@ const state = {
   museum: { fish: 0, bug: 0, shell: 0, flower: 0 },
   achievements: { bridgeMaster: false, museum10: false, relation90: false },
   decorScore: 0,
-  renderMode: '2d',
+  renderMode: '3d',
   camera3d: { yaw: 0.75, dist: 560, height: 300 },
   version: 'v2.2',
   buffs: { fish: 0, bug: 0, harvest: 0, discount: 0 },
@@ -2241,19 +2241,21 @@ function updateFishing() {
   }
 
   if (f.phase === 'reel') {
-    const width = 34;
-    const zL = Math.floor(f.zoneStart * width);
-    const zW = Math.max(1, Math.floor(f.zoneWidth * width));
-    const c = Math.floor(f.cursor * width);
-    let bar = '';
-    for (let i = 0; i < width; i++) {
-      if (i === c) bar += '|';
-      else if (i >= zL && i <= zL + zW) bar += '■';
-      else bar += '·';
-    }
-    ui.fishingUi.innerHTML = `타이밍 바: ${bar}<br>진행도 ${Math.round(f.progress)}% (구간 안에서 Space)`;
-  } else if (f.phase === 'cast') ui.fishingUi.innerHTML = '찌를 드리웠습니다... 입질을 기다리는 중';
-  else ui.fishingUi.innerHTML = '<span style="color:#fde047">!! 입질 !! 스페이스로 훅</span>';
+    const zoneLeft = Math.round(f.zoneStart * 100);
+    const zoneWidth = Math.max(8, Math.round(f.zoneWidth * 100));
+    const cursor = clamp(Math.round(f.cursor * 100), 0, 100);
+    ui.fishingUi.innerHTML = `
+      <div style="font-weight:700; margin-bottom:4px;">🎣 리일링 · ${Math.round(f.progress)}%</div>
+      <div style="position:relative; width:320px; max-width:42vw; height:16px; background:#0b1220; border:1px solid #334155; border-radius:999px; overflow:hidden;">
+        <div style="position:absolute; left:${zoneLeft}%; width:${zoneWidth}%; top:0; bottom:0; background:#22c55e55;"></div>
+        <div style="position:absolute; left:${cursor}%; top:-2px; bottom:-2px; width:2px; background:#f8fafc;"></div>
+      </div>
+      <div style="margin-top:4px; font-size:12px; color:#cbd5e1;">안전 구간에 커서를 맞추고 ${keyHint('fish')} 입력</div>`;
+  } else if (f.phase === 'cast') {
+    ui.fishingUi.innerHTML = `<b>🎣 캐스팅</b><br>찌를 드리웠습니다... 입질을 기다리는 중`;
+  } else {
+    ui.fishingUi.innerHTML = `<span style="color:#fde047; font-weight:700;">!! 입질 !! ${keyHint('fish')}로 훅</span>`;
+  }
 }
 
 function handleDialogueChoice(idx) {
@@ -2819,13 +2821,19 @@ function playerMove() {
   if (state.renderMode === '3d' && !state.house.inside) {
     const fx = -Math.cos(state.camera3d.yaw);
     const fy = -Math.sin(state.camera3d.yaw);
-    const rx = -fy;
-    const ry = fx;
+    const rx = fy;
+    const ry = -fx;
 
-    if (up) { dx += fx * spd; dy += fy * spd; }
-    if (down) { dx -= fx * spd; dy -= fy * spd; }
-    if (left) { dx -= rx * spd; dy -= ry * spd; }
-    if (right) { dx += rx * spd; dy += ry * spd; }
+    if (up) { dx += fx; dy += fy; }
+    if (down) { dx -= fx; dy -= fy; }
+    if (left) { dx -= rx; dy -= ry; }
+    if (right) { dx += rx; dy += ry; }
+
+    const len = Math.hypot(dx, dy);
+    if (len > 0.0001) {
+      dx = (dx / len) * spd;
+      dy = (dy / len) * spd;
+    }
   } else {
     if (up) { dy -= spd; state.player.facing = 'up'; }
     if (down) { dy += spd; state.player.facing = 'down'; }
@@ -4520,12 +4528,25 @@ spawnFish();
 initNPCs();
 initDialoguePools();
 rollDailyBarterOffers();
-ui.btnRender.textContent = '🧊 3D뷰';
+ui.btnRender.textContent = state.renderMode === '3d' ? '🧱 2D뷰' : '🧊 3D뷰';
 syncRenderSurface();
 setupMouseControls();
 setupOverlayEvents();
 window.addEventListener('resize', resize3DRenderer);
 updateUI();
+if (state.renderMode === '3d') {
+  ensure3DWorld().then(() => {
+    if (render3d.ready) {
+      syncRenderSurface();
+      setMsg('기본 3D 모드로 시작합니다.');
+    } else {
+      state.renderMode = '2d';
+      ui.btnRender.textContent = '🧊 3D뷰';
+      syncRenderSurface();
+      setMsg('3D 초기화 실패로 2D 모드로 시작합니다.');
+    }
+  });
+}
 tick();
 
 const GRAPHICS_PRESETS = {
