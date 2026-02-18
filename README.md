@@ -200,3 +200,22 @@ python3 scripts/download_assets.py
 - 수면 월드 좌표
 - 텍스처/모델 실패 개수
 
+
+## v2.11 모델/텍스처 파이프라인 + 3D 안정화 확장
+
+- `scripts/assets_manifest.json`의 `archives`에 Kenney CC0 ZIP 실 URL을 추가했습니다.
+- `scripts/download_assets.py`는 이제 `--force`, `--only textures|models|all` 플래그를 지원합니다.
+- 모델 다운로드 후 `assets/models/index.json`을 자동 생성하고, 태그(tree/house/character/furniture/rock 등)를 휴리스틱 분류합니다.
+- 대표 모델 별칭(`assets/models/tree.glb`, `assets/models/prop_house.glb`, `assets/models/npc/npc_0..5.glb`)을 자동 매핑/복사합니다.
+- 3D 런타임은 `assets/models/index.json`이 있으면 우선 참조해 glTF 로드를 시도하고, 실패 시 기존 별칭/폴백 순으로 진행합니다.
+- Town Board에 glTF 성공/실패/폴백 수와 FPS/드로우콜/삼각형 수를 표시합니다.
+- 텍스처 로더는 `kind=color|normal|roughness|data`에 따라 colorSpace를 분리해 노멀/러프니스 왜곡을 줄였습니다.
+- 물 머티리얼은 `depthWrite=false`, renderOrder/polygonOffset/foam depth 설정으로 근접 소실 현상을 완화했습니다.
+
+### 에셋 다운로드 예시
+
+```bash
+python3 scripts/download_assets.py --only models
+python3 scripts/download_assets.py --only textures
+python3 scripts/download_assets.py --force
+```

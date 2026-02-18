@@ -470,6 +470,8 @@ const render3d = {
   modelFailureUrls: [],
   textureStats: { loaded: 0, failed: 0 },
   modelStats: { loaded: 0, failed: 0 },
+  gltfStats: { loaded: 0, failed: 0, fallback: 0 },
+  perfStats: { fps: 60, drawCalls: 0, triangles: 0 },
   waterDebug: { exists: false, transparent: false, depthWrite: true, side: 'FrontSide', renderOrder: 0, frustumCulled: true },
   debugGroup: null,
   fxGroup: null,
@@ -2121,19 +2123,26 @@ function openTownBoard() {
     .slice(0, 3)
     .map(([id, b]) => `${id} ${b.give}x${b.giveAmt}→${b.take}x${b.takeAmt}`)
     .join(' / ');
+  const info = render3d.renderer?.info;
+  const drawCalls = info?.render?.calls ?? render3d.perfStats.drawCalls ?? 0;
+  const tris = info?.render?.triangles ?? render3d.perfStats.triangles ?? 0;
 
   const html = `
   <div class="shop-item"><span>시즌</span><span>${SEASONS[state.season]}</span></div>
   <div class="shop-item"><span>텍스처 로드</span><span>${render3d.textureStats.loaded} 성공 / ${render3d.textureStats.failed} 실패</span></div>
-  <div class="shop-item"><span>모델 로드</span><span>${render3d.modelStats.loaded} 성공 / ${render3d.modelStats.failed} 실패</span></div>
+  <div class="shop-item"><span>모델 로드(총계)</span><span>${render3d.modelStats.loaded} 성공 / ${render3d.modelStats.failed} 실패</span></div>
+  <div class="shop-item"><span>glTF 로드</span><span>${render3d.gltfStats.loaded} 성공 / ${render3d.gltfStats.failed} 실패</span></div>
+  <div class="shop-item"><span>폴백 프랍</span><span>${render3d.gltfStats.fallback}개</span></div>
   <div class="shop-item"><span>현재 날짜</span><span>${state.day}일차</span></div>
   <div class="shop-item"><span>오늘 이벤트</span><span>${state.dailyEvent}</span></div>
   <div class="shop-item"><span>퀘스트</span><span>${state.questDone ? '완료/진행 전환 대기' : '진행 중'}</span></div>
   <div class="shop-item"><span style="font-weight:600">${questText}</span></div>
-  <div class="shop-item"><span>상점 변동</span><span>매일 가격 변동</span></div>
   <div class="shop-item"><span>집 인테리어 점수</span><span>${state.decorScore}</span></div>
   <div class="shop-item"><span>주민 일일요청</span><span>${requests}</span></div>
-  <div class="shop-item"><span>오늘의 물물교환</span><span>${barters || 'NPC와 대화해 확인'}</span></div>`;
+  <div class="shop-item"><span>오늘의 물물교환</span><span>${barters || 'NPC와 대화해 확인'}</span></div>
+  <div class="shop-item"><span>평균 FPS</span><span>${(render3d.fpsAvg || 0).toFixed(1)}</span></div>
+  <div class="shop-item"><span>드로우콜 / 삼각형</span><span>${drawCalls} / ${tris}</span></div>
+  <div class="shop-item"><span>Water Debug(F3)</span><span>${state.debugRenderInfo ? 'ON' : 'OFF'}</span></div>`;
   openModal('마을 보드', html);
 }
 
@@ -2510,12 +2519,33 @@ function markAssetStats(type, ok = true, url = '') {
   }
 }
 
-function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08a') {
+function makeFlatTexture(hex = '#808080', repeat = [1, 1], colorSpace = THREE.NoColorSpace) {
+  const c = document.createElement('canvas');
+  c.width = 4;
+  c.height = 4;
+  const g = c.getContext('2d');
+  g.fillStyle = hex;
+  g.fillRect(0, 0, 4, 4);
+  const tex = new THREE.CanvasTexture(c);
+  tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
+  tex.repeat.set(repeat[0], repeat[1]);
+  tex.colorSpace = colorSpace;
+  return tex;
+}
+
+function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08a', opts = {}) {
+  const { kind = 'color', anisotropy = 4 } = opts;
   const urls = Array.isArray(urlOrUrls) ? urlOrUrls : [urlOrUrls];
-  const fallback = createNoiseTexture(fallbackColor, '#6d826d', 128, 0.12);
+  let fallback;
+  if (kind === 'normal') fallback = makeFlatTexture('#8080ff', repeat, THREE.NoColorSpace);
+  else if (kind === 'roughness' || kind === 'data') fallback = makeFlatTexture('#d9d9d9', repeat, THREE.NoColorSpace);
+  else fallback = createNoiseTexture(fallbackColor, '#6d826d', 128, 0.12);
   fallback.wrapS = fallback.wrapT = THREE.RepeatWrapping;
   fallback.repeat.set(repeat[0], repeat[1]);
+  if (kind === 'color') fallback.colorSpace = THREE.SRGBColorSpace;
+  else fallback.colorSpace = THREE.NoColorSpace;
   const loader = new THREE.TextureLoader();
+  loader.setCrossOrigin('anonymous');
 
   const tryLoad = (idx = 0) => {
     if (idx >= urls.length) {
@@ -2526,8 +2556,8 @@ function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08
       (tex) => {
         tex.wrapS = tex.wrapT = THREE.RepeatWrapping;
         tex.repeat.set(repeat[0], repeat[1]);
-        tex.colorSpace = THREE.SRGBColorSpace;
-        tex.anisotropy = 4;
+        tex.colorSpace = kind === 'color' ? THREE.SRGBColorSpace : THREE.NoColorSpace;
+        tex.anisotropy = anisotropy;
         fallback.image = tex.image;
         fallback.needsUpdate = true;
         markAssetStats('texture', true, urls[idx]);
@@ -2546,9 +2576,9 @@ function createRemoteTexture(urlOrUrls, repeat = [1, 1], fallbackColor = '#8aa08
 
 function createPBRTextureSet(basePath, repeat = [1, 1], fallbackColor = '#8aa08a') {
   return {
-    map: createRemoteTexture(`${basePath}_diff_1k.jpg`, repeat, fallbackColor),
-    normalMap: createRemoteTexture(`${basePath}_nor_gl_1k.jpg`, repeat, '#7f7fff'),
-    roughnessMap: createRemoteTexture(`${basePath}_rough_1k.jpg`, repeat, '#bcbcbc'),
+    map: createRemoteTexture(`${basePath}_diff_1k.jpg`, repeat, fallbackColor, { kind: 'color' }),
+    normalMap: createRemoteTexture(`${basePath}_nor_gl_1k.jpg`, repeat, '#7f7fff', { kind: 'normal' }),
+    roughnessMap: createRemoteTexture(`${basePath}_rough_1k.jpg`, repeat, '#bcbcbc', { kind: 'roughness' }),
   };
 }
 
@@ -2611,50 +2641,57 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
   const toonGrad = createRemoteTexture([
     'assets/stylized/toon_ramp.png',
     generatedToonRamp.image.toDataURL('image/png'),
-  ], [1, 1], '#b8b8b8');
+  ], [1, 1], '#b8b8b8', { kind: 'data' });
   toonGrad.minFilter = THREE.NearestFilter;
   toonGrad.magFilter = THREE.NearestFilter;
   toonGrad.generateMipmaps = false;
   const generatedWaterNormal = createWaterNormalCanvasTexture(128);
   const waterNormal = createRemoteTexture([
     'assets/stylized/water_normal.png',
+    'assets/pbr/water_normal.jpg',
     generatedWaterNormal.image.toDataURL('image/png'),
     'https://threejs.org/examples/textures/waternormals.jpg',
-  ], [6, 6], '#7f7fff');
+  ], [6, 6], '#7f7fff', { kind: 'normal' });
 
   const grassPBR = {
     map: createRemoteTexture([
       'assets/stylized/grass_color.png',
+      'assets/pbr/grass_color.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_diff_1k.jpg',
       'https://threejs.org/examples/textures/terrain/grasslight-big.jpg',
-    ], [12, 12], '#7ba06a'),
+    ], [12, 12], '#7ba06a', { kind: 'color' }),
     normalMap: createRemoteTexture([
       'assets/stylized/water_normal.png',
+      'assets/pbr/grass_normal.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_nor_gl_1k.jpg',
       'https://threejs.org/examples/textures/terrain/grasslight-big-nm.jpg',
-    ], [12, 12], '#7f7fff'),
+    ], [12, 12], '#7f7fff', { kind: 'normal' }),
     roughnessMap: createRemoteTexture([
+      'assets/pbr/grass_rough.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_rough_1k.jpg',
       'https://threejs.org/examples/textures/terrain/grasslight-big.jpg',
-    ], [12, 12], '#bcbcbc'),
+    ], [12, 12], '#bcbcbc', { kind: 'roughness' }),
   };
 
   const woodPBR = {
     map: createRemoteTexture([
       'assets/stylized/wood_color.png',
+      'assets/pbr/wood_color.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_diff_1k.jpg',
       'https://threejs.org/examples/textures/hardwood2_diffuse.jpg',
-    ], [4, 4], '#7a6149'),
+    ], [4, 4], '#7a6149', { kind: 'color' }),
     normalMap: createRemoteTexture([
       'assets/stylized/water_normal.png',
+      'assets/pbr/wood_normal.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_nor_gl_1k.jpg',
       'https://threejs.org/examples/textures/hardwood2_bump.jpg',
-    ], [4, 4], '#7f7fff'),
+    ], [4, 4], '#7f7fff', { kind: 'normal' }),
     roughnessMap: createRemoteTexture([
       'assets/stylized/dirt_color.png',
+      'assets/pbr/wood_rough.jpg',
       'https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_rough_1k.jpg',
       'https://threejs.org/examples/textures/hardwood2_roughness.jpg',
-    ], [4, 4], '#bcbcbc'),
+    ], [4, 4], '#bcbcbc', { kind: 'roughness' }),
   };
 
   const make = (pbrOpts, toonColor) => (isToon
@@ -2663,9 +2700,9 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
 
   return {
     grass: make({ ...grassPBR, roughness: 0.88, metalness: 0.02 }, '#92d88f'),
-    meadow: make({ map: createRemoteTexture(['assets/stylized/grass_color.png'], [12, 12], '#a9e7a0'), color: '#a9e7a0', roughness: 0.9, metalness: 0.01 }, '#a9e7a0'),
-    grove: make({ map: createRemoteTexture(['assets/stylized/grass_color.png'], [12, 12], '#7dc37a'), color: '#7dc37a', roughness: 0.9, metalness: 0.01 }, '#7dc37a'),
-    dirt: make({ map: createRemoteTexture(['assets/stylized/dirt_color.png'], [10, 10], '#b7a58d'), color: '#b7a58d', roughness: 0.96, metalness: 0.01 }, '#c5b5a3'),
+    meadow: make({ map: createRemoteTexture(['assets/stylized/grass_color.png', 'assets/pbr/grass_color.jpg'], [12, 12], '#a9e7a0', { kind: 'color' }), color: '#a9e7a0', roughness: 0.9, metalness: 0.01 }, '#a9e7a0'),
+    grove: make({ map: createRemoteTexture(['assets/stylized/grass_color.png', 'assets/pbr/grass_color.jpg'], [12, 12], '#7dc37a', { kind: 'color' }), color: '#7dc37a', roughness: 0.9, metalness: 0.01 }, '#7dc37a'),
+    dirt: make({ map: createRemoteTexture(['assets/stylized/dirt_color.png', 'assets/pbr/dirt_color.jpg'], [10, 10], '#b7a58d', { kind: 'color' }), color: '#b7a58d', roughness: 0.96, metalness: 0.01 }, '#c5b5a3'),
     wood: make({ ...woodPBR, roughness: 0.72, metalness: 0.06 }, '#bc8f6e'),
     bark: make({ color: '#85654d', roughness: 0.92 }, '#85654d'),
     leaf: make({ color: '#8fd48f', roughness: 0.84 }, '#8fd48f'),
@@ -2678,7 +2715,7 @@ function createWorldMaterials(style = state.renderStyle || 'pbr') {
     waterNormal,
     bridge: make({ ...woodPBR, roughness: 0.7, metalness: 0.05 }, '#b58d70'),
     wall: make({ color: '#f4eadf', roughness: 0.78 }, '#f6eee7'),
-    roof: make({ map: createRemoteTexture(['assets/stylized/roof_color.png'], [4, 4], '#d49aa1'), color: '#d49aa1', roughness: 0.7 }, '#d49aa1'),
+    roof: make({ map: createRemoteTexture(['assets/stylized/roof_color.png', 'assets/pbr/roof_color.jpg'], [4, 4], '#d49aa1', { kind: 'color' }), color: '#d49aa1', roughness: 0.7 }, '#d49aa1'),
     npc: make({ color: '#f2b18d', roughness: 0.64 }, '#f2b18d'),
     player: make({ color: '#9cb8f6', roughness: 0.6 }, '#9cb8f6'),
     toonGradient: toonGrad,
@@ -2692,6 +2729,7 @@ async function loadModelCached(url, loader) {
     const src = render3d.modelCache.get(url);
     return src.clone(true);
   }
+  loader.setCrossOrigin?.('anonymous');
   const gltf = await new Promise((resolve, reject) => {
     loader.load(url, resolve, undefined, reject);
   });
@@ -2712,7 +2750,7 @@ async function loadFreeWorldProps() {
     mesh.receiveShadow = true;
     render3d.world.add(mesh);
     render3d.props.push(mesh);
-    markAssetStats('model', true, 'procedural');
+    render3d.gltfStats.fallback += 1;
   };
 
   const fallbackPack = () => {
@@ -2724,17 +2762,29 @@ async function loadFreeWorldProps() {
     addFallbackProp(new THREE.SphereGeometry(0.46, 8, 8), new THREE.MeshStandardMaterial({ color: '#9ca3af', roughness: 0.95 }), [5, 0.4, -9], 0.0, 1.0);
   };
 
+  const picks = { tree: null, house: null };
+  try {
+    const res = await fetch(`${render3d.modelRoot}/index.json`, { cache: 'no-store' });
+    if (res.ok) {
+      const idx = await res.json();
+      const arr = Array.isArray(idx.models) ? idx.models : [];
+      const pick = (keys) => arr.find((m) => keys.some((k) => (m.tags || []).includes(k) || (m.path || '').toLowerCase().includes(k)));
+      picks.tree = pick(['tree']);
+      picks.house = pick(['house', 'building']);
+    }
+  } catch {}
+
   const specs = [
-    { url: `${render3d.modelRoot}/tree.glb`, pos: [-10, 0, -6], rotY: 0.4, scale: 1.4 },
-    { url: `${render3d.modelRoot}/prop_house.glb`, pos: [10, 0, -7], rotY: -0.25, scale: 1.2 },
-    { url: `${render3d.modelRoot}/kenney/nature-kit/tree.glb`, pos: [6, 0, -12], rotY: 0.15, scale: 0.9 },
-    { url: `${render3d.modelRoot}/kenney/nature-kit/rock.glb`, pos: [-5, 0, -11], rotY: 0.4, scale: 0.9 },
-    { url: `${render3d.modelRoot}/kenney/nature-kit/fence.glb`, pos: [0, 0, -13], rotY: 1.57, scale: 0.8 },
+    { url: picks.tree ? picks.tree.path : `${render3d.modelRoot}/tree.glb`, pos: [-10, 0, -6], rotY: 0.4, scale: 1.4, type: 'tree' },
+    { url: picks.house ? picks.house.path : `${render3d.modelRoot}/prop_house.glb`, pos: [10, 0, -7], rotY: -0.25, scale: 1.2, type: 'house' },
+    { url: `${render3d.modelRoot}/kenney/nature-kit/tree.glb`, pos: [6, 0, -12], rotY: 0.15, scale: 0.9, type: 'tree' },
+    { url: `${render3d.modelRoot}/kenney/nature-kit/rock.glb`, pos: [-5, 0, -11], rotY: 0.4, scale: 0.9, type: 'rock' },
+    { url: `${render3d.modelRoot}/kenney/nature-kit/fence.glb`, pos: [0, 0, -13], rotY: 1.57, scale: 0.8, type: 'fence' },
   ];
 
   const loader = new GLTFLoader();
   let loadedCount = 0;
-  await Promise.all(specs.map(async (spec) => {
+  for (const spec of specs) {
     try {
       const model = await loadModelCached(spec.url, loader);
       model.position.set(spec.pos[0], spec.pos[1], spec.pos[2]);
@@ -2748,32 +2798,43 @@ async function loadFreeWorldProps() {
       });
       render3d.world.add(model);
       render3d.props.push(model);
-      markAssetStats('model', true, spec.url);
       loadedCount += 1;
+      render3d.gltfStats.loaded += 1;
+      markAssetStats('model', true, spec.url);
     } catch {
+      render3d.gltfStats.failed += 1;
       markAssetStats('model', false, spec.url);
     }
-  }));
+  }
 
   if (loadedCount === 0) fallbackPack();
 }
 
+
 async function applyEnvironmentMap(scene, renderer) {
-  try {
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    const hdr = await new RGBELoader().loadAsync('https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloppenheim_06_puresky_1k.hdr');
-    const envMap = pmrem.fromEquirectangular(hdr).texture;
-    scene.environment = envMap;
-    hdr.dispose();
-    pmrem.dispose();
-    return true;
-  } catch (err) {
-    const pmrem = new THREE.PMREMGenerator(renderer);
-    const fallbackEnv = pmrem.fromScene(new THREE.Scene(), 0.04).texture;
-    scene.environment = fallbackEnv;
-    pmrem.dispose();
-    return false;
+  const pmrem = new THREE.PMREMGenerator(renderer);
+  const hdrLoader = new RGBELoader();
+  hdrLoader.setCrossOrigin('anonymous');
+  const hdrCandidates = [
+    'assets/pbr/kloppenheim_06_puresky_1k.hdr',
+    'https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloppenheim_06_puresky_1k.hdr',
+  ];
+  for (const url of hdrCandidates) {
+    try {
+      const hdr = await hdrLoader.loadAsync(url);
+      const envMap = pmrem.fromEquirectangular(hdr).texture;
+      scene.environment = envMap;
+      hdr.dispose();
+      pmrem.dispose();
+      return true;
+    } catch (err) {
+      markAssetStats('texture', false, url);
+    }
   }
+  const fallbackEnv = pmrem.fromScene(new THREE.Scene(), 0.04).texture;
+  scene.environment = fallbackEnv;
+  pmrem.dispose();
+  return false;
 }
 
 function setupPostProcessing(renderer, scene, camera) {
@@ -2919,10 +2980,11 @@ function applyWaterRenderState(waterMesh) {
   const m = waterMesh.material;
   m.side = THREE.DoubleSide;
   m.depthTest = true;
-  if ('transparent' in m) m.transparent = state.renderStyle !== 'toon';
-  if ('opacity' in m && state.renderStyle !== 'toon') m.opacity = 0.86;
-  if ('depthWrite' in m) m.depthWrite = state.renderStyle === 'toon';
-  waterMesh.renderOrder = 8;
+  if ('transparent' in m) m.transparent = true;
+  if ('opacity' in m) m.opacity = state.renderStyle === 'toon' ? 0.92 : 0.88;
+  if ('depthWrite' in m) m.depthWrite = false;
+  if ('polygonOffset' in m) { m.polygonOffset = true; m.polygonOffsetFactor = -1; m.polygonOffsetUnits = -1; }
+  waterMesh.renderOrder = 12;
   waterMesh.frustumCulled = false;
   render3d.waterDebug = {
     exists: true,
@@ -3099,7 +3161,7 @@ function buildThreeWorld() {
   const foamBot = foamTop.clone(); foamBot.position.set(cx, 0.17, cz + fz / 2);
   const foamL = new THREE.Mesh(new THREE.PlaneGeometry(0.2, fz), foamMat); foamL.position.set(cx - fx / 2, 0.17, cz);
   const foamR = foamL.clone(); foamR.position.set(cx + fx / 2, 0.17, cz);
-  [foamTop, foamBot, foamL, foamR].forEach((f) => { f.rotation.x = -Math.PI / 2; foamGroup.add(f); });
+  [foamTop, foamBot, foamL, foamR].forEach((f) => { f.rotation.x = -Math.PI / 2; f.renderOrder = 13; f.material.depthWrite = false; f.material.depthTest = true; foamGroup.add(f); });
   render3d.waterFoam = foamGroup;
   render3d.world.add(foamGroup);
 
@@ -3250,6 +3312,7 @@ async function ensure3DWorld() {
     render3d.loading = true;
   render3d.textureStats = { loaded: 0, failed: 0 };
   render3d.modelStats = { loaded: 0, failed: 0 };
+  render3d.gltfStats = { loaded: 0, failed: 0, fallback: 0 };
   render3d.textureFailureUrls = [];
   render3d.modelFailureUrls = [];
   try {
@@ -3265,7 +3328,7 @@ async function ensure3DWorld() {
     renderer.shadowMap.type = THREE.VSMShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
     renderer.toneMapping = THREE.ACESFilmicToneMapping;
-    renderer.toneMappingExposure = 1.12;
+    renderer.toneMappingExposure = 1.08;
     renderer.physicallyCorrectLights = true;
     ui.game3d.appendChild(renderer.domElement);
 
@@ -3396,7 +3459,11 @@ function sync3DEntities() {
   render3d.house.visible = state.house.tier > 0;
 
   if (render3d.water) {
-    if ('roughness' in render3d.water.material) render3d.water.material.roughness = state.weather === 'rainy' ? 0.08 : 0.2;
+    if ('roughness' in render3d.water.material) render3d.water.material.roughness = state.weather === 'rainy' ? 0.1 : 0.18;
+    if ('color' in render3d.water.material) {
+      const t = 0.5 + Math.sin(state.time * 0.01) * 0.5;
+      render3d.water.material.color.set(state.renderStyle === 'toon' ? '#7ec9ff' : (t > 0.5 ? '#4ea3e2' : '#5bc0f2'));
+    }
     if (render3d.mats?.waterNormal) {
       render3d.mats.waterNormal.offset.x = state.time * 0.0007;
       render3d.mats.waterNormal.offset.y = state.time * 0.00045;
@@ -3416,6 +3483,9 @@ function renderWorld3D() {
   render3d.fpsSamples.push(fps);
   if (render3d.fpsSamples.length > 120) render3d.fpsSamples.shift();
   render3d.fpsAvg = render3d.fpsSamples.reduce((a, b) => a + b, 0) / Math.max(1, render3d.fpsSamples.length);
+  render3d.perfStats.fps = render3d.fpsAvg;
+  render3d.perfStats.drawCalls = render3d.renderer?.info?.render?.calls || 0;
+  render3d.perfStats.triangles = render3d.renderer?.info?.render?.triangles || 0;
   if (state.settings.autoOptimize && render3d.fpsSamples.length > 100 && render3d.fpsAvg < 40) {
     if (state.settings.postFX) { state.settings.postFX = false; render3d.usePostFX = false; }
     else if (state.settings.shadowMapSize > 1024) { state.settings.shadowMapSize = 1024; applyGraphicsSettings(); }
@@ -3902,8 +3972,8 @@ updateUI();
 tick();
 
 const GRAPHICS_PRESETS = {
-  low: { pixelRatioCap: 1.0, shadows: false, shadowMapSize: 1024, postFX: false, treeCount: 60, rainCount: 300 },
-  medium: { pixelRatioCap: 1.5, shadows: true, shadowMapSize: 2048, postFX: true, treeCount: 120, rainCount: 900 },
+  low: { pixelRatioCap: 1.0, shadows: false, shadowMapSize: 1024, postFX: false, treeCount: 50, rainCount: 260 },
+  medium: { pixelRatioCap: 1.25, shadows: true, shadowMapSize: 1024, postFX: false, treeCount: 90, rainCount: 700 },
   high: { pixelRatioCap: 2.0, shadows: true, shadowMapSize: 4096, postFX: true, treeCount: 180, rainCount: 1200 },
   ultra: { pixelRatioCap: 2.0, shadows: true, shadowMapSize: 4096, postFX: true, treeCount: 220, rainCount: 1600 },
 };

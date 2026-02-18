@@ -7,7 +7,7 @@
         "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_nor_gl_1k.jpg",
         "rough": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/forest_ground_04/forest_ground_04_rough_1k.jpg"
       },
-      "output_dir": "assets/stylized"
+      "output_dir": "assets/pbr"
     },
     {
       "name": "dirt",
@@ -16,7 +16,7 @@
         "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt_04/dirt_04_nor_gl_1k.jpg",
         "rough": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/dirt_04/dirt_04_rough_1k.jpg"
       },
-      "output_dir": "assets/pbr/dirt"
+      "output_dir": "assets/pbr"
     },
     {
       "name": "wood",
@@ -25,7 +25,7 @@
         "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_nor_gl_1k.jpg",
         "rough": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/rough_wood/rough_wood_rough_1k.jpg"
       },
-      "output_dir": "assets/stylized"
+      "output_dir": "assets/pbr"
     },
     {
       "name": "roof",
@@ -34,14 +34,14 @@
         "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_nor_gl_1k.jpg",
         "rough": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/roof_tiles_02/roof_tiles_02_rough_1k.jpg"
       },
-      "output_dir": "assets/stylized"
+      "output_dir": "assets/pbr"
     },
     {
       "name": "water",
       "maps": {
         "normal": "https://dl.polyhaven.org/file/ph-assets/Textures/jpg/1k/water_001/water_001_nor_gl_1k.jpg"
       },
-      "output_dir": "assets/stylized"
+      "output_dir": "assets/pbr"
     }
   ],
   "hdris": [
@@ -49,6 +49,38 @@
       "name": "kloppenheim_06_puresky_1k",
       "url": "https://dl.polyhaven.org/file/ph-assets/HDRIs/hdr/1k/kloppenheim_06_puresky_1k.hdr",
       "output": "assets/pbr/kloppenheim_06_puresky_1k.hdr"
+    }
+  ],
+  "archives": [
+    {
+      "name": "platformer-kit",
+      "url": "https://kenney.nl/media/pages/assets/platformer-kit/9fd25e14aa-1768300691/kenney_platformer-kit.zip",
+      "output_dir": "assets/models/kenney/platformer-kit"
+    },
+    {
+      "name": "fantasy-town-kit",
+      "url": "https://kenney.nl/media/pages/assets/fantasy-town-kit/40ed2a2d51-1754222374/kenney_fantasy-town-kit_2.0.zip",
+      "output_dir": "assets/models/kenney/fantasy-town-kit"
+    },
+    {
+      "name": "nature-kit",
+      "url": "https://kenney.nl/media/pages/assets/nature-kit/8334871c74-1677698939/kenney_nature-kit.zip",
+      "output_dir": "assets/models/kenney/nature-kit"
+    },
+    {
+      "name": "furniture-kit",
+      "url": "https://kenney.nl/media/pages/assets/furniture-kit/e56d2a9828-1677580847/kenney_furniture-kit.zip",
+      "output_dir": "assets/models/kenney/furniture-kit"
+    },
+    {
+      "name": "animated-characters-2",
+      "url": "https://www.kenney.nl/media/pages/assets/animated-characters-2/97b9013f4b-1694862573/kenney_animated-characters-2.zip",
+      "output_dir": "assets/models/kenney/animated-characters-2"
+    },
+    {
+      "name": "city-kit-suburban",
+      "url": "https://www.kenney.nl/media/pages/assets/city-kit-suburban/167f6dbc31-1745479373/kenney_city-kit-suburban_20.zip",
+      "output_dir": "assets/models/kenney/city-kit-suburban"
     }
   ],
   "kenney_pages": [

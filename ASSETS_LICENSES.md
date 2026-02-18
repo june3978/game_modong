@@ -18,3 +18,11 @@
 
 스크립트는 에셋 URL/페이지를 기반으로 파일을 가져오며, 레포에는 대용량 바이너리를 강제 커밋하지 않습니다.
 에셋이 없을 경우 게임은 procedural/fallback 렌더링으로 동작합니다.
+
+### Bundled manifest targets (CC0)
+- Kenney Platformer Kit
+- Kenney Fantasy Town Kit 2.0
+- Kenney Nature Kit
+- Kenney Furniture Kit
+- Kenney Animated Characters 2
+- Kenney City Kit Suburban 2.0
