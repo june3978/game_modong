@@ -949,6 +949,7 @@ const render3d = {
   fxParticles: [],
   fpsAvg: 60,
   fpsSamples: [],
+  rebuildingStyle: false,
 };
 
 function setMsg(text, t = 170) { state.msg = text; state.msgTimer = t; }
@@ -4343,17 +4344,34 @@ function tick() {
 
 
 function rebuildThreeWorldForStyle() {
-  if (!render3d.ready || !render3d.scene) return;
-  if (render3d.world) {
-    render3d.scene.remove(render3d.world);
+  if (!render3d.ready || !render3d.scene) return true;
+  if (render3d.rebuildingStyle) return false;
+  render3d.rebuildingStyle = true;
+  try {
+    if (render3d.world) {
+      render3d.scene.remove(render3d.world);
+    }
+    buildThreeWorld();
+    return true;
+  } catch (err) {
+    console.error('[style-toggle] rebuild failed', err);
+    setMsg('스타일 전환 실패: 안전 모드로 유지');
+    return false;
+  } finally {
+    render3d.rebuildingStyle = false;
   }
-  buildThreeWorld();
 }
 
 function toggleRenderStyle() {
-  state.renderStyle = state.renderStyle === 'pbr' ? 'toon' : 'pbr';
+  const prevStyle = state.renderStyle;
+  const nextStyle = state.renderStyle === 'pbr' ? 'toon' : 'pbr';
+  state.renderStyle = nextStyle;
   if (state.renderMode === '3d' && render3d.ready) {
-    rebuildThreeWorldForStyle();
+    const ok = rebuildThreeWorldForStyle();
+    if (!ok) {
+      state.renderStyle = prevStyle;
+      return;
+    }
   }
   if (ui.btnStyle) ui.btnStyle.textContent = state.renderStyle === 'toon' ? '🎨 PBR 스타일' : '🎨 동숲 스타일';
   setMsg(state.renderStyle === 'toon' ? '동숲 스타일 활성화' : 'PBR 스타일 활성화');
