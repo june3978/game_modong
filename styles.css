@@ -79,3 +79,43 @@ canvas { width: 100%; height: auto; border-radius: 12px; border: 1px solid rgba(
 .map-svg { width: 100%; max-width: 420px; display: block; margin: 0 auto; }
 .map-mini { display: grid; place-items: center; }
 .map-mini-svg { width: 100%; max-width: 190px; display: block; }
+
+.overlay-root {
+  position: fixed;
+  inset: 0;
+  z-index: 50;
+  background: rgba(2, 6, 23, 0.52);
+  display: grid;
+  place-items: center;
+}
+.overlay-root.hidden { display:none !important; }
+.overlay-card {
+  width: min(760px, 92vw);
+  max-height: 86vh;
+  overflow: auto;
+  background: rgba(15,23,42,0.92);
+  color: #e5e7eb;
+  border: 1px solid rgba(148,163,184,0.4);
+  border-radius: 14px;
+  box-shadow: 0 24px 60px rgba(0,0,0,0.4);
+  padding: 14px;
+}
+.overlay-card h3 { margin: 4px 0 12px; }
+.overlay-grid { display:grid; gap: 8px; }
+.overlay-row { display:flex; justify-content:space-between; gap:10px; align-items:center; padding:8px; background:rgba(30,41,59,0.6); border-radius:10px; }
+.overlay-actions { display:flex; gap:8px; flex-wrap:wrap; }
+.overlay-card button { background:#1d4ed8; color:white; }
+.overlay-card button.secondary { background:#334155; }
+.overlay-card button.warn { background:#b91c1c; }
+.keychip { background:#0b1220; border:1px solid #334155; border-radius:8px; padding:4px 8px; min-width:84px; text-align:center; }
+
+.side-hud.collapsed { max-height: 52px; overflow: hidden; }
+.inventory [data-item] { position: relative; }
+.inventory [data-item]:hover::after {
+  content: attr(data-tip);
+  position: absolute;
+  left: 0; bottom: calc(100% + 4px);
+  background: #0f172a; color: #e2e8f0;
+  border: 1px solid #334155; border-radius: 8px;
+  padding: 6px 8px; font-size: 12px; white-space: nowrap;
+}

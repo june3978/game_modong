@@ -128,3 +128,44 @@ python3 -m http.server 8000
 - 텍스처는 주기함수 기반 노이즈를 사용해서 가장자리 이음새가 자연스럽게 반복(tileable)됩니다.
 - 게임은 `createWorldMaterials()`에서 `assets/stylized/*`를 **최우선**으로 로드하고,
   파일이 없으면 기존 원격 텍스처 체인/절차적 폴백으로 자동 전환됩니다.
+
+## v2.9 UI/입력/성능 개편 (PC UX)
+
+### 현황 감사(Audit) 요약
+- 주요 DOM: 상단 액션 버튼(`btnMenu`, `btnRender`, `btnCraft`, `btnShop`, `btnBuild`, `btnTown`, `btnMuseum`, `btnMap`, `btnStyle`),
+  캔버스(`game`), 3D 루트(`game3d`), 대화 UI(`dialogueUi`), 메시지(`message`), 모달(`modal`), 오버레이 루트(`overlayRoot`).
+- 입력 액션: 이동/달리기/상호작용/낚시/지도/3D 토글/스타일 토글/카메라 회전/카메라 줌/디버그/일시정지.
+- 렌더 비용 포인트: shadow map 크기, postFX bloom, pixel ratio, tree/rain 인스턴스 밀도, 매 프레임 DOM 업데이트.
+
+### 구현된 개선
+- ESC 일시정지 메뉴 + 스택형 오버레이 화면(`pause/settings/keybinds/graphics`) 추가.
+- 액션 매핑 기반 입력 시스템 + 키 리바인딩(키1/키2) + localStorage 저장(`keybindings_v1`).
+- 설정 저장(`settings_v1`): 그래픽 프리셋, 자동 최적화, 마우스 감도.
+- 3D 카메라 마우스 조작: 우클릭/중클릭 드래그 회전, 휠 줌.
+- 3D 플레이어 회전: 360도 yaw 스무딩(4방향 스냅 제거).
+- 3D 성능: 기본 MEDIUM 프리셋, 자동 최적화(FPS 저하시 postFX/그림자/픽셀비율 단계적 하향).
+- UI 성능: updateUI/미니맵 갱신 스로틀로 DOM 부하 완화.
+- 조작 도움말/인벤토리 툴팁을 현재 바인딩/상태 기반으로 자동 렌더.
+
+## CC0 에셋 다운로드 파이프라인
+
+브라우저 런타임에서 zip 해제/파일 저장이 어려우므로, 로컬 스크립트로 에셋을 받아서 `assets/`에 배치합니다.
+
+```bash
+python3 scripts/download_assets.py
+```
+
+- 매니페스트: `scripts/assets_manifest.json`
+- 기본 포함: Poly Haven(CC0) 텍스처/HDRI 샘플
+- Kenney/Quaternius(CC0): zip 직링크를 manifest에 채운 뒤 동일 스크립트로 추출
+- 에셋이 없어도 게임은 procedural/fallback으로 플레이 가능
+
+## 수동 테스트 절차 (체크리스트)
+
+1. 게임 실행 후 `Esc` → 일시정지 메뉴 표시/`계속`으로 복귀 확인.
+2. `설정`에서 자동 최적화/감도 변경 후 새로고침해 값 유지 확인.
+3. `키 설정`에서 상호작용 키 변경 후 새 키로 `E` 대체 동작 확인.
+4. 3D 진입 후 마우스 드래그 회전/휠 줌 동작 확인.
+5. 3D 이동 시 플레이어가 360도 자연 회전하는지 확인.
+6. 그래픽 화면에서 LOW/MEDIUM/HIGH 전환 시 그림자/성능 체감 변화 확인.
+7. 기존 기능(상점/제작/건축/박물관/지도/미니맵/대화/저장/불러오기) 회귀 확인.

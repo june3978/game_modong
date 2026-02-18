@@ -60,6 +60,7 @@ const ui = {
   modalTitle: document.getElementById('modalTitle'),
   modalBody: document.getElementById('modalBody'),
   modalClose: document.getElementById('modalClose'),
+  btnMenu: document.getElementById('btnMenu'),
   btnRender: document.getElementById('btnRender'),
   btnCraft: document.getElementById('btnCraft'),
   btnShop: document.getElementById('btnShop'),
@@ -68,6 +69,8 @@ const ui = {
   btnMuseum: document.getElementById('btnMuseum'),
   btnMap: document.getElementById('btnMap'),
   btnStyle: document.getElementById('btnStyle'),
+  overlayRoot: document.getElementById('overlayRoot'),
+  sideHud: document.querySelector('.side-hud'),
 };
 
 const TILE = 48;
@@ -156,7 +159,7 @@ const state = {
   coins: 110,
   level: 1,
   xp: 0,
-  player: { x: 960, y: 1120, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false, lastSafeX: 960, lastSafeY: 1120 },
+  player: { x: 960, y: 1120, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false, lastSafeX: 960, lastSafeY: 1120, yaw: 0, targetYaw: 0 },
   inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, bug: 0, seed: 2, furniture: 0 },
   objects: [],
   fishes: [],
@@ -200,11 +203,106 @@ const state = {
   dialoguePools: {},
   debugPaths: false,
   renderStyle: 'pbr',
+  paused: false,
+  uiStack: [],
+  uiDirty: true,
+  lastUiUpdate: 0,
+  lastMiniMapUpdate: 0,
+  miniMapCache: '',
+  settings: {
+    graphicsPreset: 'medium',
+    pixelRatioCap: 1.5,
+    shadows: true,
+    shadowMapSize: 2048,
+    postFX: true,
+    treeCount: 120,
+    rainCount: 900,
+    autoOptimize: true,
+    mouseSensitivity: 1,
+  },
 };
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function rnd(min, max) { return Math.random() * (max - min) + min; }
 function dist(a, b) { return worldDistance(a, b); }
+
+const STORAGE_KEYS = {
+  save: 'healing_island_save_v3',
+  settings: 'settings_v1',
+  keybindings: 'keybindings_v1',
+};
+
+const ACTION_LABELS = {
+  moveUp: '위로 이동', moveDown: '아래 이동', moveLeft: '왼쪽 이동', moveRight: '오른쪽 이동',
+  run: '달리기', interact: '상호작용', fish: '낚시/타이밍', openMap: '지도 열기',
+  camRotateLeft: '카메라 좌회전', camRotateRight: '카메라 우회전', camZoomIn: '카메라 줌 인', camZoomOut: '카메라 줌 아웃',
+  pauseMenu: '일시정지 메뉴', toggleStyle: '스타일 토글', toggle3D: '2D/3D 전환', toggleDebug: '디버그 토글',
+};
+
+const DEFAULT_BINDINGS = {
+  moveUp: ['KeyW', 'ArrowUp'],
+  moveDown: ['KeyS', 'ArrowDown'],
+  moveLeft: ['KeyA', 'ArrowLeft'],
+  moveRight: ['KeyD', 'ArrowRight'],
+  run: ['ShiftLeft', 'ShiftRight'],
+  interact: ['KeyE'],
+  fish: ['Space'],
+  openMap: ['KeyM'],
+  toggle3D: ['KeyV'],
+  toggleStyle: ['KeyB'],
+  camRotateLeft: ['KeyQ'],
+  camRotateRight: ['KeyC'],
+  camZoomIn: ['KeyZ'],
+  camZoomOut: ['KeyX'],
+  pauseMenu: ['Escape'],
+  toggleDebug: ['KeyP'],
+};
+
+const input = {
+  pressed: new Set(),
+  justPressed: new Set(),
+  bindings: JSON.parse(JSON.stringify(DEFAULT_BINDINGS)),
+  pendingRebind: null,
+  isDown(action) {
+    const codes = this.bindings[action] || [];
+    return codes.some((c) => this.pressed.has(c));
+  },
+  consume(action) {
+    const codes = this.bindings[action] || [];
+    for (const c of codes) {
+      if (this.justPressed.has(c)) {
+        this.justPressed.delete(c);
+        return true;
+      }
+    }
+    return false;
+  },
+};
+
+function friendlyCodeLabel(code) {
+  if (!code) return '-';
+  const map = { ArrowUp: '↑', ArrowDown: '↓', ArrowLeft: '←', ArrowRight: '→', Space: 'Space', ShiftLeft: 'LShift', ShiftRight: 'RShift', Escape: 'Esc' };
+  if (map[code]) return map[code];
+  if (code.startsWith('Key')) return code.slice(3);
+  if (code.startsWith('Digit')) return code.slice(5);
+  return code;
+}
+
+function loadPreferences() {
+  try {
+    const rawS = localStorage.getItem(STORAGE_KEYS.settings);
+    if (rawS) state.settings = { ...state.settings, ...JSON.parse(rawS) };
+  } catch {}
+  try {
+    const rawB = localStorage.getItem(STORAGE_KEYS.keybindings);
+    if (rawB) input.bindings = { ...input.bindings, ...JSON.parse(rawB) };
+  } catch {}
+}
+
+function persistPreferences() {
+  localStorage.setItem(STORAGE_KEYS.settings, JSON.stringify(state.settings));
+  localStorage.setItem(STORAGE_KEYS.keybindings, JSON.stringify(input.bindings));
+}
 
 function wrapAxis(v, max) {
   const m = ((v % max) + max) % max;
@@ -345,6 +443,8 @@ const render3d = {
   debugGroup: null,
   fxGroup: null,
   fxParticles: [],
+  fpsAvg: 60,
+  fpsSamples: [],
 };
 
 function setMsg(text, t = 170) { state.msg = text; state.msgTimer = t; }
@@ -476,11 +576,11 @@ function saveGame() {
     achievements: state.achievements,
     player: { x: state.player.x, y: state.player.y },
   };
-  localStorage.setItem('healing_island_save_v3', JSON.stringify(snapshot));
+  localStorage.setItem(STORAGE_KEYS.save, JSON.stringify(snapshot));
 }
 
 function loadGame() {
-  const raw = localStorage.getItem('healing_island_save_v3');
+  const raw = localStorage.getItem(STORAGE_KEYS.save);
   if (!raw) return;
   try {
     const s = JSON.parse(raw);
@@ -850,7 +950,7 @@ function drawHouseInterior() {
     }
   });
 
-  drawCharacterScreen(state.house.interiorPlayer.x, state.house.interiorPlayer.y, '#3b82f6', state.player.facing, 'player', state.keys.size ? 0.1 : 0);
+  drawCharacterScreen(state.house.interiorPlayer.x, state.house.interiorPlayer.y, '#3b82f6', state.player.facing, 'player', (input.isDown('moveUp') || input.isDown('moveDown') || input.isDown('moveLeft') || input.isDown('moveRight')) ? 0.1 : 0);
 }
 
 function drawResource(o) {
@@ -987,7 +1087,7 @@ function drawAllCharacters() {
     drawCharacter(n.x, n.y, n.color, n.facing || 'down', n.id, Math.hypot(n.vx || 0, n.vy || 0));
     drawSpeechBubble(n, n.talk);
   });
-  drawCharacter(state.player.x, state.player.y, '#2563eb', state.player.facing, 'player', state.keys.size ? 0.1 : 0);
+  drawCharacter(state.player.x, state.player.y, '#2563eb', state.player.facing, 'player', (input.isDown('moveUp') || input.isDown('moveDown') || input.isDown('moveLeft') || input.isDown('moveRight')) ? 0.1 : 0);
   if (state.dialogue) drawDialogueChoices();
 }
 
@@ -1814,6 +1914,110 @@ function openModal(title, html) {
 }
 function closeModal() { ui.modal.classList.add('hidden'); }
 
+
+function isOverlayOpen() {
+  return state.uiStack.length > 0;
+}
+
+function renderOverlay() {
+  if (!ui.overlayRoot) return;
+  const top = state.uiStack[state.uiStack.length - 1];
+  if (!top) {
+    ui.overlayRoot.classList.add('hidden');
+    ui.overlayRoot.innerHTML = '';
+    return;
+  }
+  ui.overlayRoot.classList.remove('hidden');
+  const body = top.html || '';
+  ui.overlayRoot.innerHTML = `<section class="overlay-card" data-screen="${top.name}"><h3>${top.title || ''}</h3><div class="overlay-grid">${body}</div></section>`;
+}
+
+function pushScreen(name, payload = {}) {
+  const screens = {
+    pauseMenu: () => ({ title: '⏸️ 일시정지', html: `
+      <div class="overlay-actions"> 
+        <button data-ui="resume">계속</button>
+        <button data-ui="settings">설정</button>
+        <button data-ui="keybinds">키 설정</button>
+        <button data-ui="graphics">그래픽</button>
+        <button data-ui="save">저장</button>
+        <button data-ui="load">불러오기</button>
+        <button data-ui="newgame" class="warn">새 게임</button>
+        <button data-ui="title" class="secondary">타이틀로</button>
+      </div>` }),
+    settings: () => ({ title: '⚙️ 설정', html: `
+      <div class="overlay-row"><span>자동 최적화</span><button data-ui="toggleAutoOpt">${state.settings.autoOptimize ? 'ON' : 'OFF'}</button></div>
+      <div class="overlay-row"><span>마우스 감도</span><button data-ui="mouseDown">-</button><span>${state.settings.mouseSensitivity.toFixed(1)}</span><button data-ui="mouseUp">+</button></div>
+      <div class="overlay-actions"><button data-ui="back" class="secondary">뒤로</button></div>` }),
+    graphics: () => ({ title: '🖥️ 그래픽', html: `
+      <div class="overlay-actions">
+        <button data-ui="preset" data-preset="low">LOW</button>
+        <button data-ui="preset" data-preset="medium">MEDIUM</button>
+        <button data-ui="preset" data-preset="high">HIGH</button>
+        <button data-ui="preset" data-preset="ultra">ULTRA</button>
+      </div>
+      <div class="overlay-row"><span>현재 프리셋</span><b>${state.settings.graphicsPreset.toUpperCase()}</b></div>
+      <div class="overlay-row"><span>그림자</span><b>${state.settings.shadows ? 'ON' : 'OFF'}</b></div>
+      <div class="overlay-row"><span>PostFX</span><b>${state.settings.postFX ? 'ON' : 'OFF'}</b></div>
+      <div class="overlay-actions"><button data-ui="back" class="secondary">뒤로</button></div>` }),
+    keybinds: () => ({ title: '⌨️ 키 설정', html: Object.entries(ACTION_LABELS).map(([k,v]) => {
+      const binds = input.bindings[k] || [];
+      return `<div class="overlay-row"><span>${v}</span><span class="keychip">${friendlyCodeLabel(binds[0])}</span><span class="keychip">${friendlyCodeLabel(binds[1])}</span><button data-ui="rebind" data-action="${k}" data-slot="0">키1 변경</button><button data-ui="rebind" data-action="${k}" data-slot="1">키2 변경</button></div>`;
+    }).join('') + `<div class="overlay-actions"><button data-ui="resetBinds">기본값</button><button data-ui="back" class="secondary">뒤로</button></div>` }),
+  };
+
+  const builder = screens[name];
+  if (!builder) return;
+  const screen = builder(payload);
+  state.uiStack.push({ name, ...screen });
+  state.paused = true;
+  renderOverlay();
+}
+
+function popScreen() {
+  state.uiStack.pop();
+  if (state.uiStack.length === 0) state.paused = false;
+  renderOverlay();
+}
+
+function replaceScreen(name, payload = {}) {
+  if (state.uiStack.length) state.uiStack.pop();
+  pushScreen(name, payload);
+}
+
+function togglePauseMenu() {
+  if (isOverlayOpen()) {
+    state.uiStack = [];
+    state.paused = false;
+    renderOverlay();
+  } else {
+    pushScreen('pauseMenu');
+  }
+}
+
+function handleOverlayAction(action, btn) {
+  if (action === 'resume') return togglePauseMenu();
+  if (action === 'settings') return pushScreen('settings');
+  if (action === 'graphics') return pushScreen('graphics');
+  if (action === 'keybinds') return pushScreen('keybinds');
+  if (action === 'back') return popScreen();
+  if (action === 'save') { saveGame(); setMsg('저장 완료'); return; }
+  if (action === 'load') { loadGame(); setMsg('불러오기 완료'); return; }
+  if (action === 'newgame') { if (confirm('정말 새 게임을 시작할까요?')) { localStorage.removeItem(STORAGE_KEYS.save); location.reload(); } return; }
+  if (action === 'title') { location.reload(); return; }
+  if (action === 'toggleAutoOpt') { state.settings.autoOptimize = !state.settings.autoOptimize; persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'mouseUp') { state.settings.mouseSensitivity = clamp(state.settings.mouseSensitivity + 0.1, 0.3, 2.4); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'mouseDown') { state.settings.mouseSensitivity = clamp(state.settings.mouseSensitivity - 0.1, 0.3, 2.4); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'preset') { applyGraphicsPreset(btn.dataset.preset || 'medium'); return replaceScreen('graphics'); }
+  if (action === 'resetBinds') { input.bindings = JSON.parse(JSON.stringify(DEFAULT_BINDINGS)); persistPreferences(); return replaceScreen('keybinds'); }
+  if (action === 'rebind') {
+    input.pendingRebind = { action: btn.dataset.action, slot: Number(btn.dataset.slot || 0) };
+    setMsg('새 키를 누르세요. Esc 취소');
+    return;
+  }
+}
+
+
 function openCraft() {
   const html = `
   <div class="recipe"><span>🪑 기본 의자 (wood 4, flower 2)</span><button data-craft="chair">제작</button></div>
@@ -2077,7 +2281,8 @@ function bindModalActions() {
         }
       }
 
-      updateUI();
+      state.uiDirty = true;
+  updateUI();
       saveGame();
     });
   });
@@ -2088,13 +2293,13 @@ function playerMove() {
 
   let dx = 0;
   let dy = 0;
-  const run = state.keys.has('Shift');
+  const run = input.isDown('run');
   const spd = (run ? 1.45 : 1) * (state.player.energy > 0 ? state.player.speed : 1.2);
 
-  const up = state.keys.has('ArrowUp') || state.keys.has('w');
-  const down = state.keys.has('ArrowDown') || state.keys.has('s');
-  const left = state.keys.has('ArrowLeft') || state.keys.has('a');
-  const right = state.keys.has('ArrowRight') || state.keys.has('d');
+  const up = input.isDown('moveUp');
+  const down = input.isDown('moveDown');
+  const left = input.isDown('moveLeft');
+  const right = input.isDown('moveRight');
 
   if (state.renderMode === '3d' && !state.house.inside) {
     const fx = -Math.cos(state.camera3d.yaw);
@@ -2143,6 +2348,11 @@ function playerMove() {
   }
 
   if ((dx || dy) && state.renderMode === '3d' && !state.house.inside) {
+    state.player.targetYaw = -Math.atan2(dx, dy);
+    let diff = state.player.targetYaw - state.player.yaw;
+    while (diff > Math.PI) diff -= Math.PI * 2;
+    while (diff < -Math.PI) diff += Math.PI * 2;
+    state.player.yaw += diff * 0.16;
     if (Math.abs(dx) > Math.abs(dy)) state.player.facing = dx > 0 ? 'right' : 'left';
     else state.player.facing = dy > 0 ? 'down' : 'up';
   }
@@ -2742,7 +2952,7 @@ function buildThreeWorld() {
   render3d.world.add(bridgeGroup);
   if (state.renderStyle === 'toon') addOutlineToObject(bridgeGroup, 1.03, '#233042');
 
-  const treeCount = 120;
+  const treeCount = state.settings.treeCount || 120;
   const trunkGeo = new THREE.CylinderGeometry(0.15, 0.2, 1.4, 8);
   const leafGeo = new THREE.SphereGeometry(0.7, 10, 10);
   const trunks = new THREE.InstancedMesh(trunkGeo, mats.bark, treeCount);
@@ -2870,7 +3080,7 @@ async function ensure3DWorld() {
 
     const camera = new THREE.PerspectiveCamera(55, 16 / 9, 0.1, 220);
     const renderer = new THREE.WebGLRenderer({ antialias: true, powerPreference: 'high-performance' });
-    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, 2));
+    renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, state.settings.pixelRatioCap || 1.5));
     renderer.shadowMap.enabled = true;
     renderer.shadowMap.type = THREE.VSMShadowMap;
     renderer.outputColorSpace = THREE.SRGBColorSpace;
@@ -2936,6 +3146,7 @@ async function ensure3DWorld() {
     buildThreeWorld();
     await loadFreeWorldProps();
     render3d.ready = true;
+    applyGraphicsSettings();
     resize3DRenderer();
   } catch (err) {
     console.error(err);
@@ -2962,8 +3173,8 @@ function sync3DEntities() {
 
   const p = to3D(state.player.x, state.player.y);
   render3d.player.position.set(p.x, 0.25, p.z);
-  render3d.player.rotation.y = facingToYaw(state.player.facing);
-  animateRigCharacter(render3d.player, state.time * 0.016, state.keys.size > 0);
+  render3d.player.rotation.y = state.renderMode === "3d" ? (state.player.yaw || facingToYaw(state.player.facing)) : facingToYaw(state.player.facing);
+  animateRigCharacter(render3d.player, state.time * 0.016, input.isDown('moveUp') || input.isDown('moveDown') || input.isDown('moveLeft') || input.isDown('moveRight'));
 
   state.npcs.forEach((npc, i) => {
     const mesh = render3d.npcMeshes[i];
@@ -3015,6 +3226,15 @@ function renderWorld3D() {
 
   const dt = render3d.clock ? render3d.clock.getDelta() : 0.016;
   const animTime = state.time * 0.016 + dt;
+  const fps = 1 / Math.max(0.001, dt);
+  render3d.fpsSamples.push(fps);
+  if (render3d.fpsSamples.length > 120) render3d.fpsSamples.shift();
+  render3d.fpsAvg = render3d.fpsSamples.reduce((a, b) => a + b, 0) / Math.max(1, render3d.fpsSamples.length);
+  if (state.settings.autoOptimize && render3d.fpsSamples.length > 100 && render3d.fpsAvg < 40) {
+    if (state.settings.postFX) { state.settings.postFX = false; render3d.usePostFX = false; }
+    else if (state.settings.shadowMapSize > 1024) { state.settings.shadowMapSize = 1024; applyGraphicsSettings(); }
+    else if (state.settings.pixelRatioCap > 1) { state.settings.pixelRatioCap = 1; applyGraphicsSettings(); }
+  }
 
   const centerX = state.player.x / TILE - MAP_W / 2;
   const centerZ = state.player.y / TILE - MAP_H / 2;
@@ -3143,6 +3363,44 @@ function renderWorld3D() {
   else render3d.renderer.render(render3d.scene, render3d.camera);
 }
 
+
+const mouseCam = { dragging: false, lastX: 0 };
+
+function setupMouseControls() {
+  if (!ui.game3d) return;
+  ui.game3d.addEventListener('contextmenu', (e) => e.preventDefault());
+  ui.game3d.addEventListener('pointerdown', (e) => {
+    if (e.button === 2 || e.button === 1) {
+      mouseCam.dragging = true;
+      mouseCam.lastX = e.clientX;
+    }
+  });
+  window.addEventListener('pointerup', (e) => {
+    if (state.renderMode === '3d' && e.button === 0 && !mouseCam.dragging) interact();
+    mouseCam.dragging = false;
+  });
+  window.addEventListener('pointermove', (e) => {
+    if (!mouseCam.dragging || state.renderMode !== '3d') return;
+    const dx = e.clientX - mouseCam.lastX;
+    mouseCam.lastX = e.clientX;
+    state.camera3d.yaw += dx * 0.004 * (state.settings.mouseSensitivity || 1);
+  });
+  ui.game3d.addEventListener('wheel', (e) => {
+    if (state.renderMode !== '3d') return;
+    e.preventDefault();
+    state.camera3d.dist = clamp(state.camera3d.dist + Math.sign(e.deltaY) * 22, 300, 900);
+  }, { passive: false });
+}
+
+function setupOverlayEvents() {
+  if (!ui.overlayRoot) return;
+  ui.overlayRoot.addEventListener('click', (e) => {
+    const btn = e.target.closest('[data-ui]');
+    if (btn) return handleOverlayAction(btn.dataset.ui, btn);
+    if (e.target === ui.overlayRoot) popScreen();
+  });
+}
+
 function syncRenderSurface() {
   const enable3D = state.renderMode === '3d' && !state.house.inside;
   canvas.classList.toggle('hidden', enable3D);
@@ -3165,6 +3423,9 @@ function renderMiniMapHtml(size = 180) {
 }
 
 function updateUI() {
+  const now = performance.now();
+  if (!state.uiDirty && now - state.lastUiUpdate < 100) return;
+  state.lastUiUpdate = now;
   window.__renderStats = {
     textures: { ...render3d.textureStats },
     models: { ...render3d.modelStats },
@@ -3177,7 +3438,7 @@ function updateUI() {
   const phase = t > 0.66 ? '아침' : t > 0.33 ? '노을' : '밤';
   state.decorScore = calcDecorScore();
   ui.stats.innerHTML = `🗓️ D${state.day} ${SEASONS[state.season]} · 🕒 ${phase} · 🎉 ${state.dailyEvent} · ⚡ ${Math.floor(state.player.energy)} · 💖 ${Math.floor(state.player.mood)} · 🪙 ${state.coins} · ⭐ ${state.level} · 🏠 ${state.decorScore} · ${state.renderMode.toUpperCase()}/${state.renderStyle.toUpperCase()} · TX ${render3d.textureStats.loaded}/${render3d.textureStats.failed} · MD ${render3d.modelStats.loaded}/${render3d.modelStats.failed} · ${state.version}`;
-  ui.inventory.innerHTML = ITEMS.map(([k, e]) => `<div>${e} ${k}: <b>${state.inv[k]}</b></div>`).join('');
+  ui.inventory.innerHTML = ITEMS.map(([k, e]) => `<div data-item="${k}" data-tip="${k} · 수량 ${state.inv[k]}">${e} ${k}: <b>${state.inv[k]}</b></div>`).join('');
 
   const q = getQuest();
   if (!q) ui.quest.innerHTML = '모든 2단계 기본 퀘스트 완료!';
@@ -3192,7 +3453,19 @@ function updateUI() {
   const ach = state.achievements;
   ui.achievements.innerHTML = `다리장인: ${ach.bridgeMaster ? '✅' : '⬜'}<br>큐레이터: ${ach.museum10 ? '✅' : '⬜'}<br>베스트프렌드: ${ach.relation90 ? '✅' : '⬜'}`;
   ui.log.innerHTML = state.logs.map((l) => `• ${l}`).join('<br>');
-  if (ui.worldMapMini) ui.worldMapMini.innerHTML = renderMiniMapHtml();
+
+  const controls = document.querySelector('.controls');
+  if (controls) {
+    controls.innerHTML = [
+      `이동: ${friendlyCodeLabel(input.bindings.moveUp?.[0])}/${friendlyCodeLabel(input.bindings.moveDown?.[0])}/${friendlyCodeLabel(input.bindings.moveLeft?.[0])}/${friendlyCodeLabel(input.bindings.moveRight?.[0])}`,
+      `상호작용: ${friendlyCodeLabel(input.bindings.interact?.[0])}`,
+      `낚시/타이밍: ${friendlyCodeLabel(input.bindings.fish?.[0])}`,
+      `지도: ${friendlyCodeLabel(input.bindings.openMap?.[0])}`,
+      `3D 카메라: ${friendlyCodeLabel(input.bindings.camRotateLeft?.[0])}/${friendlyCodeLabel(input.bindings.camRotateRight?.[0])}, ${friendlyCodeLabel(input.bindings.camZoomIn?.[0])}/${friendlyCodeLabel(input.bindings.camZoomOut?.[0])}`,
+      `메뉴: ${friendlyCodeLabel(input.bindings.pauseMenu?.[0])}`,
+    ].map((t) => `<li>${t}</li>`).join('');
+  }
+  if (ui.worldMapMini && (now - state.lastMiniMapUpdate > 220 || state.uiDirty)) { state.lastMiniMapUpdate = now; state.miniMapCache = renderMiniMapHtml(); ui.worldMapMini.innerHTML = state.miniMapCache; }
   const shopDoor = { x: SHOP_PLOT.x + 92, y: SHOP_PLOT.y + 102 };
   const museumDoor = { x: MUSEUM_PLOT.x + 106, y: MUSEUM_PLOT.y + 110 };
   state.prompt = '';
@@ -3228,9 +3501,22 @@ function updateUI() {
     ui.dialogueUi.classList.add('hidden');
     ui.dialogueUi.innerHTML = '';
   }
+  state.uiDirty = false;
 }
 
 function tick() {
+  if (state.paused) {
+    if (state.renderMode === '3d' && render3d.ready && !state.house.inside) renderWorld3D();
+    else if (!state.house.inside) { drawWorld(); state.objects.forEach(drawResource); drawFish(); drawAllCharacters(); }
+    else drawHouseInterior();
+    syncRenderSurface();
+    state.uiDirty = true;
+    updateUI();
+    input.justPressed.clear();
+    requestAnimationFrame(tick);
+    return;
+  }
+
   state.time += 1;
   if (state.msgTimer > 0) state.msgTimer -= 1;
 
@@ -3260,8 +3546,10 @@ function tick() {
   maybeProgressQuest();
   updateCalendar();
   checkAchievements();
+  state.uiDirty = true;
   updateUI();
 
+  input.justPressed.clear();
   requestAnimationFrame(tick);
 }
 
@@ -3293,45 +3581,74 @@ async function toggleRenderMode() {
 }
 
 window.addEventListener('keydown', (e) => {
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
+  const code = e.code;
+
+  if (input.pendingRebind) {
+    if (code === 'Escape') { input.pendingRebind = null; setMsg('키 변경 취소'); return; }
+    const { action, slot } = input.pendingRebind;
+    const conflict = Object.entries(input.bindings).find(([a, arr]) => a !== action && (arr || []).includes(code));
+    if (conflict) {
+      setMsg(`${friendlyCodeLabel(code)} 는 이미 ${ACTION_LABELS[conflict[0]]}에 사용 중`);
+      input.pendingRebind = null;
+      return;
+    }
+    const arr = input.bindings[action] || [];
+    arr[slot] = code;
+    input.bindings[action] = Array.from(new Set(arr.filter(Boolean))).slice(0, 2);
+    input.pendingRebind = null;
+    persistPreferences();
+    if (isOverlayOpen() && state.uiStack[state.uiStack.length - 1]?.name === 'keybinds') replaceScreen('keybinds');
+    setMsg(`${ACTION_LABELS[action]} 키 변경: ${friendlyCodeLabel(code)}`);
+    return;
+  }
+
+  input.pressed.add(code);
+  input.justPressed.add(code);
+
+  if (input.consume('pauseMenu')) {
+    if (state.dialogue) return closeDialogue();
+    if (isOverlayOpen()) return popScreen();
+    return pushScreen('pauseMenu');
+  }
+  if (isOverlayOpen()) return;
 
   if (state.dialogue) {
-    if (key === '1') return handleDialogueChoice(1);
-    if (key === '2') return handleDialogueChoice(2);
-    if (key === 'escape') return closeDialogue();
+    if (code === 'Digit1') return handleDialogueChoice(1);
+    if (code === 'Digit2') return handleDialogueChoice(2);
   }
 
   if (state.house.inside) {
-    if (key === 'i') return moveFurniture(0, -1);
-    if (key === 'k') return moveFurniture(0, 1);
-    if (key === 'j') return moveFurniture(-1, 0);
-    if (key === 'l') return moveFurniture(1, 0);
-    if (key === 't') return rotateFurniture();
-    if (key === 'tab') { e.preventDefault(); return cycleFurnitureSelection(); }
+    if (code === 'KeyI') return moveFurniture(0, -1);
+    if (code === 'KeyK') return moveFurniture(0, 1);
+    if (code === 'KeyJ') return moveFurniture(-1, 0);
+    if (code === 'KeyL') return moveFurniture(1, 0);
+    if (code === 'KeyT') return rotateFurniture();
+    if (code === 'Tab') { e.preventDefault(); return cycleFurnitureSelection(); }
   }
 
   if (state.renderMode === '3d') {
-    if (key === 'q') { state.camera3d.yaw -= 0.08; return; }
-    if (key === 'c') { state.camera3d.yaw += 0.08; return; }
-    if (key === 'z') { state.camera3d.dist = clamp(state.camera3d.dist - 28, 300, 900); return; }
-    if (key === 'x') { state.camera3d.dist = clamp(state.camera3d.dist + 28, 300, 900); return; }
+    if (input.consume('camRotateLeft')) { state.camera3d.yaw -= 0.08; return; }
+    if (input.consume('camRotateRight')) { state.camera3d.yaw += 0.08; return; }
+    if (input.consume('camZoomIn')) { state.camera3d.dist = clamp(state.camera3d.dist - 28, 300, 900); return; }
+    if (input.consume('camZoomOut')) { state.camera3d.dist = clamp(state.camera3d.dist + 28, 300, 900); return; }
   }
 
-  if (key === ' ') { e.preventDefault(); fishingInput(); return; }
-  if (key === 'm') { openWorldMap(); return; }
-  if (key === 'p') { state.debugPaths = !state.debugPaths; setMsg(`NPC 디버그 ${state.debugPaths ? 'ON' : 'OFF'}`); return; }
-  if (key === 'e') { interact(); return; }
-  if (key === 'f') { placeFurniture(); return; }
-  if (key === 'r') { handleFarmAction(); return; }
-  if (key === 'g') { catchBugAction(); return; }
-  state.keys.add(key);
+  if (input.consume('fish')) { e.preventDefault(); fishingInput(); return; }
+  if (input.consume('openMap')) { openWorldMap(); return; }
+  if (input.consume('interact')) { interact(); return; }
+  if (input.consume('toggleDebug')) { state.debugPaths = !state.debugPaths; setMsg(`NPC 디버그 ${state.debugPaths ? 'ON' : 'OFF'}`); return; }
+  if (input.consume('toggle3D')) { toggleRenderMode(); return; }
+  if (input.consume('toggleStyle')) { toggleRenderStyle(); return; }
+
+  if (code === 'KeyF') { placeFurniture(); return; }
+  if (code === 'KeyR') { handleFarmAction(); return; }
+  if (code === 'KeyG') { catchBugAction(); return; }
 });
 
 window.addEventListener('keyup', (e) => {
-  const key = e.key.length === 1 ? e.key.toLowerCase() : e.key;
-  state.keys.delete(key);
+  input.pressed.delete(e.code);
 });
-
+ui.btnMenu?.addEventListener('click', () => pushScreen('pauseMenu'));
 ui.btnRender.addEventListener('click', toggleRenderMode);
 ui.btnCraft.addEventListener('click', openCraft);
 ui.btnShop.addEventListener('click', openShop);
@@ -3355,6 +3672,7 @@ ui.dialogueUi.addEventListener('click', (e) => {
   else closeDialogue();
 });
 
+loadPreferences();
 initSpriteAtlases();
 loadGame();
 calcDailyShopStock();
@@ -3366,6 +3684,34 @@ initDialoguePools();
 rollDailyBarterOffers();
 ui.btnRender.textContent = '🧊 3D뷰';
 syncRenderSurface();
+setupMouseControls();
+setupOverlayEvents();
 window.addEventListener('resize', resize3DRenderer);
 updateUI();
 tick();
+
+const GRAPHICS_PRESETS = {
+  low: { pixelRatioCap: 1.0, shadows: false, shadowMapSize: 1024, postFX: false, treeCount: 60, rainCount: 300 },
+  medium: { pixelRatioCap: 1.5, shadows: true, shadowMapSize: 2048, postFX: true, treeCount: 120, rainCount: 900 },
+  high: { pixelRatioCap: 2.0, shadows: true, shadowMapSize: 4096, postFX: true, treeCount: 180, rainCount: 1200 },
+  ultra: { pixelRatioCap: 2.0, shadows: true, shadowMapSize: 4096, postFX: true, treeCount: 220, rainCount: 1600 },
+};
+
+function applyGraphicsPreset(name = 'medium') {
+  const p = GRAPHICS_PRESETS[name] || GRAPHICS_PRESETS.medium;
+  state.settings.graphicsPreset = name;
+  Object.assign(state.settings, p);
+  applyGraphicsSettings();
+  persistPreferences();
+}
+
+function applyGraphicsSettings() {
+  if (!render3d.renderer) return;
+  render3d.renderer.setPixelRatio(Math.min(window.devicePixelRatio || 1, state.settings.pixelRatioCap || 1.5));
+  render3d.renderer.shadowMap.enabled = !!state.settings.shadows;
+  if (render3d.sun?.shadow?.mapSize) render3d.sun.shadow.mapSize.set(state.settings.shadowMapSize || 2048, state.settings.shadowMapSize || 2048);
+  render3d.usePostFX = !!state.settings.postFX && !!render3d.composer;
+}
+
+if (!state.settings.graphicsPreset) applyGraphicsPreset('medium');
+
