@@ -1194,6 +1194,8 @@ function initNPCs() {
     lookYaw: 0,
     targetYaw: 0,
     modelForwardOffsetYaw: MODEL_FORWARD_OFFSET_YAW,
+    lastFrameX: h.x,
+    lastFrameY: h.y,
   }));
 
   state.npcs.forEach((n) => {
@@ -1617,6 +1619,25 @@ function facingToYaw(facing = 'down') {
   if (facing === 'left') return Math.PI * 0.5;
   if (facing === 'right') return -Math.PI * 0.5;
   return 0;
+}
+
+function getCameraRelativeMoveVector(up, down, left, right, speed) {
+  const forwardX = -Math.cos(state.camera3d.yaw);
+  const forwardY = -Math.sin(state.camera3d.yaw);
+  // right-handed basis on XZ plane
+  const rightX = -forwardY;
+  const rightY = forwardX;
+
+  let dx = 0;
+  let dy = 0;
+  if (up) { dx += forwardX; dy += forwardY; }
+  if (down) { dx -= forwardX; dy -= forwardY; }
+  if (left) { dx -= rightX; dy -= rightY; }
+  if (right) { dx += rightX; dy += rightY; }
+
+  const len = Math.hypot(dx, dy);
+  if (len <= 0.0001) return { dx: 0, dy: 0 };
+  return { dx: (dx / len) * speed, dy: (dy / len) * speed };
 }
 
 function updateCamera() {
@@ -2819,21 +2840,9 @@ function playerMove() {
   const right = input.isDown('moveRight');
 
   if (state.renderMode === '3d' && !state.house.inside) {
-    const fx = -Math.cos(state.camera3d.yaw);
-    const fy = -Math.sin(state.camera3d.yaw);
-    const rx = fy;
-    const ry = -fx;
-
-    if (up) { dx += fx; dy += fy; }
-    if (down) { dx -= fx; dy -= fy; }
-    if (left) { dx -= rx; dy -= ry; }
-    if (right) { dx += rx; dy += ry; }
-
-    const len = Math.hypot(dx, dy);
-    if (len > 0.0001) {
-      dx = (dx / len) * spd;
-      dy = (dy / len) * spd;
-    }
+    const mv = getCameraRelativeMoveVector(up, down, left, right, spd);
+    dx = mv.dx;
+    dy = mv.dy;
   } else {
     if (up) { dy -= spd; state.player.facing = 'up'; }
     if (down) { dy += spd; state.player.facing = 'down'; }
@@ -4277,7 +4286,11 @@ function updateUI() {
     const camDist = render3d.camera.position.distanceTo(new THREE.Vector3(state.player.x / TILE - MAP_W / 2, 0, state.player.y / TILE - MAP_H / 2));
     const txFail = render3d.textureFailureUrls.slice(0, 1).join(',') || '-';
     const mdFail = render3d.modelFailureUrls.slice(0, 1).join(',') || '-';
-    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} d:${camDist.toFixed(2)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | YAW p:${(state.player.yaw||0).toFixed(2)} t:${(state.player.targetYaw||0).toFixed(2)} off:${(state.modelForwardOffsetYaw||0).toFixed(2)} spd:${(state.player.speed3D||0).toFixed(2)} | TXF:${render3d.textureFailureUrls.length}(${txFail}) MDF:${render3d.modelFailureUrls.length}(${mdFail})`;
+    const fwX = -Math.cos(state.camera3d.yaw || 0);
+    const fwY = -Math.sin(state.camera3d.yaw || 0);
+    const rtX = -fwY;
+    const rtY = fwX;
+    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} d:${camDist.toFixed(2)} | BASIS f:${fwX.toFixed(2)},${fwY.toFixed(2)} r:${rtX.toFixed(2)},${rtY.toFixed(2)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | YAW p:${(state.player.yaw||0).toFixed(2)} t:${(state.player.targetYaw||0).toFixed(2)} off:${(state.modelForwardOffsetYaw||0).toFixed(2)} spd:${(state.player.speed3D||0).toFixed(2)} | TXF:${render3d.textureFailureUrls.length}(${txFail}) MDF:${render3d.modelFailureUrls.length}(${mdFail})`;
     ui.message.textContent = `${ui.message.textContent ? `${ui.message.textContent} | ` : ''}${dbg}`;
   }
 
