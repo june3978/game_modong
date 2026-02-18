@@ -219,3 +219,11 @@ python3 scripts/download_assets.py --only models
 python3 scripts/download_assets.py --only textures
 python3 scripts/download_assets.py --force
 ```
+
+## v2.12 NPC 문답/기억형 대화 시스템
+
+- NPC 대화를 2지선다에서 **최대 4선택지 문답**으로 확장했습니다.
+- 대화는 한 번 선택으로 끝나지 않고, 질문→반응→후속 질문으로 이어지는 멀티턴 흐름을 제공합니다.
+- NPC별 `npcMemories`에 최근 대화 주제/플레이어 반응을 저장해 다음 만남의 첫 대사와 분기 선택에 반영됩니다.
+- `요청/교환/선물` 루프는 유지하면서 대화형 플로우 안으로 통합했습니다.
+- 키 입력도 `1~4` 선택을 지원하며, ESC(일시정지 바인딩)로 대화 종료가 가능합니다.

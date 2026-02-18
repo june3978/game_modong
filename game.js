@@ -210,6 +210,7 @@ const state = {
   interactionFlags: {},
   barterOffers: {},
   dialoguePools: {},
+  npcMemories: {},
   debugPaths: false,
   debugRenderInfo: false,
   renderStyle: 'pbr',
@@ -403,6 +404,7 @@ function initDialoguePools() {
   };
   state.dialoguePools = {};
   state.npcs.forEach((n) => {
+    if (!state.npcMemories[n.id]) state.npcMemories[n.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
     state.dialoguePools[n.id] = buildDialoguePool(n.name, traitMap[n.id] || ['일상']);
   });
 }
@@ -412,6 +414,186 @@ function getDialogueLine(npc) {
   if (!pool.length) return `${npc.name}: 무슨 이야기 할까?`;
   const idx = (state.day * 17 + Math.floor(state.time / 40) + npc.name.length * 13 + Math.floor(Math.random() * 11)) % pool.length;
   return pool[idx];
+}
+
+function getNpcMemory(npc) {
+  if (!state.npcMemories[npc.id]) state.npcMemories[npc.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
+  return state.npcMemories[npc.id];
+}
+
+function pushNpcMemory(npc, topic, playerAnswer, npcReply, moodDelta = 0) {
+  const mem = getNpcMemory(npc);
+  mem.lastTopic = topic;
+  mem.affinity = clamp((mem.affinity || 0) + moodDelta, -50, 120);
+  mem.history = Array.isArray(mem.history) ? mem.history : [];
+  mem.history.unshift({ day: state.day, topic, playerAnswer, npcReply });
+  mem.history = mem.history.slice(0, 16);
+  if (topic) mem.facts[topic] = playerAnswer;
+}
+
+function getMemoryInfluencedLine(npc) {
+  const mem = getNpcMemory(npc);
+  if (mem.history?.length) {
+    const recent = mem.history[0];
+    return `${npc.name}: 지난번에 '${recent.topic}' 얘기했던 거 기억해. 네가 '${recent.playerAnswer}'라고 했지?`;
+  }
+  return getDialogueLine(npc);
+}
+
+function setDialogueNode(npc, node, line, options) {
+  state.dialogue = { npc, node, line, options };
+  npc.talk = line;
+}
+
+function openDialogueRoot(npc) {
+  const mem = getNpcMemory(npc);
+  const memoryHint = mem.history?.length ? `지난 대화 ${mem.history[0].topic}` : '처음 만남';
+  setDialogueNode(npc, 'root', `${npc.name}: 오늘은 뭘 이야기해볼까? (${memoryHint})`, [
+    { id: 'smalltalk', label: '근황 묻기' },
+    { id: 'askTopic', label: '취향/생각 질문하기' },
+    { id: 'request', label: '요청/교환/선물 이야기' },
+    { id: 'recall', label: '지난 대화 이어가기' },
+  ]);
+}
+
+function openAskTopicMenu(npc) {
+  setDialogueNode(npc, 'askTopic', `${npc.name}: 좋아, 어떤 주제가 궁금해?`, [
+    { id: 'topic_season', label: '좋아하는 계절은?' },
+    { id: 'topic_hobby', label: '요즘 빠진 취미는?' },
+    { id: 'topic_food', label: '좋아하는 음식은?' },
+    { id: 'topic_back', label: '다른 얘기로 돌아가기' },
+  ]);
+}
+
+function openReactionMenu(npc, topic, npcLine) {
+  setDialogueNode(npc, `react_${topic}`, npcLine, [
+    { id: `react_${topic}_agree`, label: '공감해, 나도 그래' },
+    { id: `react_${topic}_cheer`, label: '응원해줄게!' },
+    { id: `react_${topic}_joke`, label: '농담으로 분위기 풀기' },
+    { id: 'react_back', label: '주제 선택으로 돌아가기' },
+  ]);
+}
+
+function resolveTopicQuestion(npc, topicId) {
+  const byId = {
+    topic_season: { topic: '계절', line: `${npc.name}: 난 ${state.weather === 'rainy' ? '비 오는 계절' : '바람 선선한 계절'}이 좋아.` },
+    topic_hobby: { topic: '취미', line: `${npc.name}: 요즘은 ${(npc.traits?.poi || ['산책'])[0]} 관련 일을 자주 해.` },
+    topic_food: { topic: '음식', line: `${npc.name}: 달콤한 베리잼이 최고야.` },
+  };
+  const t = byId[topicId];
+  if (!t) return openAskTopicMenu(npc);
+  openReactionMenu(npc, t.topic, t.line);
+}
+
+function applyReactionChoice(npc, reactionId, topic) {
+  const mapping = {
+    agree: { text: '맞아, 나도 비슷하게 느껴.', mood: 4, rel: 3 },
+    cheer: { text: '응원해줘서 든든해!', mood: 6, rel: 4 },
+    joke: { text: '하하, 너랑 말하면 웃겨.', mood: 3, rel: 2 },
+  };
+  const key = reactionId.split('_').pop();
+  const data = mapping[key] || mapping.agree;
+  npc.talk = `${npc.name}: ${data.text}`;
+  npc.mood = clamp(npc.mood + data.mood, 0, 100);
+  state.relationships[npc.id] = clamp((state.relationships[npc.id] || 0) + data.rel, 0, 100);
+  pushNpcMemory(npc, topic, key, data.text, data.rel);
+  setDialogueNode(npc, 'followup', `${npc.name}: 계속 이야기할래?`, [
+    { id: 'askTopic', label: '다른 질문 더 하기' },
+    { id: 'smalltalk', label: '가벼운 근황으로' },
+    { id: 'recall', label: '기억 기반으로 이어가기' },
+    { id: 'end', label: '오늘 대화는 여기까지' },
+  ]);
+}
+
+function handleDialogueAction(actionId) {
+  if (!state.dialogue) return;
+  const n = state.dialogue.npc;
+  if (actionId === 'smalltalk') {
+    const mem = getNpcMemory(n);
+    const extra = mem.lastTopic ? `지난번 ${mem.lastTopic} 얘기 재밌었어.` : '오늘 처음 이야기하는 기분이네.';
+    n.talk = `${getDialogueLine(n)} ${extra}`;
+    state.coins += 5;
+    setMsg(`${n.name}와 담소. 코인 +5`);
+    return setDialogueNode(n, 'followup', `${n.name}: 더 얘기할래?`, [
+      { id: 'askTopic', label: '질문 이어가기' },
+      { id: 'request', label: '부탁/교환 이야기' },
+      { id: 'recall', label: '지난 이야기 꺼내기' },
+      { id: 'end', label: '대화 종료' },
+    ]);
+  }
+
+  if (actionId === 'askTopic') return openAskTopicMenu(n);
+
+  if (actionId.startsWith('topic_')) {
+    if (actionId === 'topic_back') return openDialogueRoot(n);
+    return resolveTopicQuestion(n, actionId);
+  }
+
+  if (actionId.startsWith('react_')) {
+    if (actionId === 'react_back') return openAskTopicMenu(n);
+    const parts = actionId.split('_');
+    const topic = parts[1] || '주제';
+    return applyReactionChoice(n, actionId, topic);
+  }
+
+  if (actionId === 'recall') {
+    const mem = getNpcMemory(n);
+    if (!mem.history?.length) {
+      n.talk = `${n.name}: 아직 깊은 이야기는 못했네. 지금부터 만들어보자!`;
+    } else {
+      const m = mem.history[0];
+      n.talk = `${n.name}: 지난번 '${m.topic}' 이야기에서 네 반응 '${m.playerAnswer}'가 기억나.`;
+    }
+    return setDialogueNode(n, 'followup', `${n.name}: 이 이야기를 더 이어갈까?`, [
+      { id: 'askTopic', label: '질문 더 하기' },
+      { id: 'smalltalk', label: '가벼운 이야기로 전환' },
+      { id: 'request', label: '요청/교환 확인' },
+      { id: 'end', label: '마무리하기' },
+    ]);
+  }
+
+  if (actionId === 'request') {
+    const req = state.residentRequests[n.id];
+    if (req && req.doneDay !== state.day && (state.inv[req.item] || 0) >= req.need) {
+      state.inv[req.item] -= req.need;
+      state.coins += req.reward;
+      req.doneDay = state.day;
+      state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 6, 0, 100);
+      n.talk = '고마워! 오늘 부탁 해결!';
+      setMsg(`${n.name} 요청 완료! +${req.reward} 코인`);
+      addLog(`${n.name} 일일 요청 완료 (${req.item} ${req.need})`);
+      pushNpcMemory(n, '요청', '완료', '신뢰 상승', 5);
+    } else {
+      const barter = tryNpcBarter(n);
+      if (barter.ok) {
+        n.talk = `${getDialogueLine(n)} 방금 교환도 완벽했어.`;
+        setMsg(barter.msg);
+        spawnNpcReactionEffect(n, 'heart');
+        pushNpcMemory(n, '교환', '성공', barter.msg, 4);
+      } else if (state.inv.berry > 0) {
+        state.inv.berry -= 1;
+        n.mood = clamp(n.mood + 10, 0, 100);
+        state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 4, 0, 100);
+        n.talk = '열매 선물 고마워!';
+        spawnNpcReactionEffect(n, 'heart');
+        setMsg('선물 성공! 호감도 상승');
+        pushNpcMemory(n, '선물', 'berry', '열매 선물', 3);
+      } else {
+        const tip = req ? `오늘 요청: ${req.item} ${req.need} / 교환 재료도 확인해보세요.` : barter.msg;
+        setMsg(tip);
+      }
+    }
+    return setDialogueNode(n, 'followup', `${n.name}: 다른 이야기도 해볼래?`, [
+      { id: 'smalltalk', label: '근황 이야기' },
+      { id: 'askTopic', label: '질문하기' },
+      { id: 'recall', label: '기억 이야기' },
+      { id: 'end', label: '종료' },
+    ]);
+  }
+
+  if (actionId === 'end') {
+    closeDialogue();
+  }
 }
 
 function rollDailyBarterOffers() {
@@ -607,6 +789,7 @@ function saveGame() {
     shopStock: state.shopStock,
     museum: state.museum,
     achievements: state.achievements,
+    npcMemories: state.npcMemories,
     player: { x: state.player.x, y: state.player.y },
   };
   localStorage.setItem(STORAGE_KEYS.save, JSON.stringify(snapshot));
@@ -635,6 +818,7 @@ function loadGame() {
     state.shopStock = { ...state.shopStock, ...(s.shopStock || {}) };
     state.museum = { ...state.museum, ...(s.museum || {}) };
     state.achievements = { ...state.achievements, ...(s.achievements || {}) };
+    state.npcMemories = { ...state.npcMemories, ...(s.npcMemories || {}) };
     if (s.player) {
       state.player.x = s.player.x ?? state.player.x;
       state.player.y = s.player.y ?? state.player.y;
@@ -721,6 +905,7 @@ function initNPCs() {
   }));
 
   state.npcs.forEach((n) => {
+    if (!state.npcMemories[n.id]) state.npcMemories[n.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
     if (tileAt(n.x, n.y).b === 'water' && n.id !== 'maru') {
       n.x = n.home.x;
       n.y = n.home.y + 40;
@@ -794,6 +979,7 @@ function drawNpcPaths2D() {
   ctx.strokeStyle = 'rgba(37, 99, 235, 0.9)';
   ctx.lineWidth = 2;
   state.npcs.forEach((n) => {
+    if (!state.npcMemories[n.id]) state.npcMemories[n.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
     if (!n.path || n.pathIndex >= n.path.length) return;
     const start = worldToScreen(n.x, n.y);
     ctx.beginPath();
@@ -1109,15 +1295,19 @@ function drawSpeechBubble(actor, text) {
 function drawDialogueChoices() {
   if (!state.dialogue) return;
   const p = worldToScreen(state.player.x, state.player.y);
-  ctx.fillStyle = 'rgba(15,23,42,0.84)';
-  ctx.fillRect(p.x - 190, p.y + 40, 380, 80);
+  const opts = Array.isArray(state.dialogue.options) ? state.dialogue.options.slice(0, 4) : [];
+  const h = Math.max(80, 30 + opts.length * 22);
+  ctx.fillStyle = 'rgba(15,23,42,0.86)';
+  ctx.fillRect(p.x - 200, p.y + 40, 400, h);
   ctx.fillStyle = '#fff';
-  ctx.fillText(`1) ${state.dialogue.a}`, p.x - 176, p.y + 62);
-  ctx.fillText(`2) ${state.dialogue.b}`, p.x - 176, p.y + 88);
+  opts.forEach((opt, i) => {
+    ctx.fillText(`${i + 1}) ${opt.label}`, p.x - 186, p.y + 62 + i * 22);
+  });
 }
 
 function drawAllCharacters() {
   state.npcs.forEach((n) => {
+    if (!state.npcMemories[n.id]) state.npcMemories[n.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
     drawCharacter(n.x, n.y, n.color, n.facing || 'down', n.id, Math.hypot(n.vx || 0, n.vy || 0));
     drawSpeechBubble(n, n.talk);
   });
@@ -1491,6 +1681,7 @@ function spawnNpcReactionEffect(npc, kind = 'heart') {
 
 function updateNPCs() {
   state.npcs.forEach((n) => {
+    if (!state.npcMemories[n.id]) state.npcMemories[n.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
     if (n.pause) return;
     const prevState = n.state;
     n.state = npcScheduledState(n);
@@ -1775,60 +1966,10 @@ function updateFishing() {
 
 function handleDialogueChoice(idx) {
   if (!state.dialogue) return;
-  const n = state.dialogue.npc;
-  const q = getQuest();
-  if (!q) return;
-
-  if (idx === 1) {
-    const met = Object.entries(q.needs).every(([k, v]) => (state.inv[k] || 0) >= v);
-    if (!state.questDone && met) {
-      Object.entries(q.needs).forEach(([k, v]) => { state.inv[k] -= v; });
-      state.coins += q.reward;
-      state.questDone = true;
-      n.talk = '완벽해! 고마워!';
-      spawnNpcReactionEffect(n, 'spark');
-      state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 8, 0, 100);
-      setMsg(`퀘스트 완료! 코인 +${q.reward}`);
-      addLog(`퀘스트 완료: ${q.title}`);
-    } else {
-      n.mood = clamp(n.mood + 4, 0, 100);
-      state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 2, 0, 100);
-      n.talk = getDialogueLine(n);
-      state.coins += 5;
-      setMsg(`${n.name}와 담소. 코인 +5`);
-    }
-  }
-
-  if (idx === 2) {
-    const req = state.residentRequests[n.id];
-    if (req && req.doneDay !== state.day && (state.inv[req.item] || 0) >= req.need) {
-      state.inv[req.item] -= req.need;
-      state.coins += req.reward;
-      req.doneDay = state.day;
-      state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 6, 0, 100);
-      n.talk = `고마워! 오늘 부탁 해결!`;
-      setMsg(`${n.name} 요청 완료! +${req.reward} 코인`);
-      addLog(`${n.name} 일일 요청 완료 (${req.item} ${req.need})`);
-    } else {
-      const barter = tryNpcBarter(n);
-      if (barter.ok) {
-        n.talk = getDialogueLine(n);
-        setMsg(barter.msg);
-        spawnNpcReactionEffect(n, 'heart');
-      } else if (state.inv.berry > 0) {
-        state.inv.berry -= 1;
-        n.mood = clamp(n.mood + 10, 0, 100);
-        state.relationships[n.id] = clamp((state.relationships[n.id] || 0) + 4, 0, 100);
-        n.talk = '열매 선물 고마워!';
-        spawnNpcReactionEffect(n, 'heart');
-        setMsg('선물 성공! 호감도 상승');
-      } else {
-        const tip = req ? `오늘 요청: ${req.item} ${req.need} / 교환 재료도 확인해보세요.` : barter.msg;
-        setMsg(tip);
-      }
-    }
-  }
-  closeDialogue();
+  const opts = Array.isArray(state.dialogue.options) ? state.dialogue.options : [];
+  const picked = opts[idx - 1];
+  if (!picked) return;
+  handleDialogueAction(picked.id);
 }
 
 function closeDialogue() {
@@ -1899,8 +2040,8 @@ function interact() {
     n.pause = true;
     state.player.facing = facingTo(state.player, n);
     n.facing = facingTo(n, state.player);
-    n.talk = getDialogueLine(n);
-    state.dialogue = { npc: n, a: '잡담/퀘스트 전달', b: '요청/물물교환/선물' };
+    n.talk = getMemoryInfluencedLine(n);
+    openDialogueRoot(n);
     return;
   }
 
@@ -2466,6 +2607,7 @@ function updateCalendar() {
     rollResidentRequests();
     rollDailyBarterOffers();
     state.npcs.forEach((n) => {
+    if (!state.npcMemories[n.id]) state.npcMemories[n.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
       n.poiVisitDay = state.day;
       n.poiVisitsToday = 0;
       n.visitedPoiToday = {};
@@ -3603,6 +3745,7 @@ function renderWorld3D() {
       render3d.debugGroup.remove(c);
     }
     state.npcs.forEach((n) => {
+    if (!state.npcMemories[n.id]) state.npcMemories[n.id] = { history: [], facts: {}, affinity: 0, lastTopic: '' };
       if (!n.path || n.pathIndex >= n.path.length) return;
       const pts = [new THREE.Vector3(n.x / TILE - MAP_W / 2, 0.2, n.y / TILE - MAP_H / 2)];
       for (let i = n.pathIndex; i < n.path.length; i += 1) {
@@ -3773,12 +3916,12 @@ function updateUI() {
 
   if (state.dialogue) {
     ui.dialogueUi.classList.remove('hidden');
+    const opts = Array.isArray(state.dialogue.options) ? state.dialogue.options : [];
     ui.dialogueUi.innerHTML = `
       <div class="name">💬 ${state.dialogue.npc.name}</div>
-      <div class="line">${state.dialogue.npc.talk || `${state.dialogue.npc.name}: 무슨 이야기 할까?`}</div>
+      <div class="line">${state.dialogue.npc.talk || state.dialogue.line || `${state.dialogue.npc.name}: 무슨 이야기 할까?`}</div>
       <div class="choices">
-        <button data-choice="1">1) ${state.dialogue.a}</button>
-        <button data-choice="2">2) ${state.dialogue.b}</button>
+        ${opts.map((opt, i) => `<button data-choice="${i + 1}">${i + 1}) ${opt.label}</button>`).join('')}
         <button data-choice="0">${keyHint('pauseMenu')}) 대화 종료</button>
       </div>`;
   } else {
@@ -3897,6 +4040,8 @@ window.addEventListener('keydown', (e) => {
   if (state.dialogue) {
     if (code === 'Digit1') return handleDialogueChoice(1);
     if (code === 'Digit2') return handleDialogueChoice(2);
+    if (code === 'Digit3') return handleDialogueChoice(3);
+    if (code === 'Digit4') return handleDialogueChoice(4);
   }
 
   if (state.house.inside) {
@@ -3950,6 +4095,8 @@ ui.dialogueUi.addEventListener('click', (e) => {
   const c = btn.getAttribute('data-choice');
   if (c === '1') handleDialogueChoice(1);
   else if (c === '2') handleDialogueChoice(2);
+  else if (c === '3') handleDialogueChoice(3);
+  else if (c === '4') handleDialogueChoice(4);
   else closeDialogue();
 });
 
