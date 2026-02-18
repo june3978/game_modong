@@ -160,6 +160,16 @@ python3 scripts/download_assets.py
 - Kenney/Quaternius(CC0): zip 직링크를 manifest에 채운 뒤 동일 스크립트로 추출
 - 에셋이 없어도 게임은 procedural/fallback으로 플레이 가능
 
+
+### GitHub Pages 배포 시 모델 로딩 방법(선택지 B 권장)
+
+대용량 바이너리를 레포에 직접 커밋하지 않으려면 **GitHub Releases + jsDelivr CDN** 방식을 사용하세요.
+
+1. 로컬에서 `python3 scripts/download_assets.py`를 1회 실행해 `assets/models`를 채웁니다.
+2. 필요한 `*.glb` 파일만 릴리즈 아티팩트로 업로드합니다.
+3. `assets/models/index.json`의 `path`를 jsDelivr 고정 URL(태그 기준)로 교체하면 Pages에서도 동일 로더로 동작합니다.
+4. CORS/URL 실패 시 게임은 기존 procedural fallback으로 자동 진행됩니다.
+
 ## 수동 테스트 절차 (체크리스트)
 
 1. 게임 실행 후 `Esc` → 일시정지 메뉴 표시/`계속`으로 복귀 확인.

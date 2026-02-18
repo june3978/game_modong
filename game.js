@@ -2344,12 +2344,21 @@ function openTownBoard() {
   const drawCalls = info?.render?.calls ?? render3d.perfStats.drawCalls ?? 0;
   const tris = info?.render?.triangles ?? render3d.perfStats.triangles ?? 0;
 
+  const gltfFailedCount = render3d.modelFailureUrls.length;
+  const modelFailedList = gltfFailedCount
+    ? `<div class="shop-item"><span>모델 실패 경로</span><span style="max-width:64%; text-align:right; word-break:break-all;">${render3d.modelFailureUrls.slice(0, 4).join(' | ')}</span></div>`
+    : '<div class="shop-item"><span>모델 실패 경로</span><span>없음</span></div>';
+  const texFailed = render3d.textureFailureUrls.length
+    ? `<div class="shop-item"><span>텍스처 실패 URL</span><span style="max-width:64%; text-align:right; word-break:break-all;">${render3d.textureFailureUrls.slice(0, 3).join(' | ')}</span></div>`
+    : '<div class="shop-item"><span>텍스처 실패 URL</span><span>없음</span></div>';
+
   const html = `
   <div class="shop-item"><span>시즌</span><span>${SEASONS[state.season]}</span></div>
   <div class="shop-item"><span>텍스처 로드</span><span>${render3d.textureStats.loaded} 성공 / ${render3d.textureStats.failed} 실패</span></div>
   <div class="shop-item"><span>모델 로드(총계)</span><span>${render3d.modelStats.loaded} 성공 / ${render3d.modelStats.failed} 실패</span></div>
-  <div class="shop-item"><span>glTF 로드</span><span>${render3d.gltfStats.loaded} 성공 / ${render3d.gltfStats.failed} 실패</span></div>
-  <div class="shop-item"><span>폴백 프랍</span><span>${render3d.gltfStats.fallback}개</span></div>
+  <div class="shop-item"><span>glTF 실로드 성공</span><span>${render3d.gltfStats.loaded}개</span></div>
+  <div class="shop-item"><span>폴백 프리미티브</span><span>${render3d.gltfStats.fallback}개</span></div>
+  <div class="shop-item"><span>glTF 실패 건수</span><span>${gltfFailedCount}개</span></div>
   <div class="shop-item"><span>현재 날짜</span><span>${state.day}일차</span></div>
   <div class="shop-item"><span>오늘 이벤트</span><span>${state.dailyEvent}</span></div>
   <div class="shop-item"><span>퀘스트</span><span>${state.questDone ? '완료/진행 전환 대기' : '진행 중'}</span></div>
@@ -2359,6 +2368,8 @@ function openTownBoard() {
   <div class="shop-item"><span>오늘의 물물교환</span><span>${barters || 'NPC와 대화해 확인'}</span></div>
   <div class="shop-item"><span>평균 FPS</span><span>${(render3d.fpsAvg || 0).toFixed(1)}</span></div>
   <div class="shop-item"><span>드로우콜 / 삼각형</span><span>${drawCalls} / ${tris}</span></div>
+  ${texFailed}
+  ${modelFailedList}
   <div class="shop-item"><span>Water Debug(F3)</span><span>${state.debugRenderInfo ? 'ON' : 'OFF'}</span></div>
   <div class="shop-item"><span>PlayerYaw/Target</span><span>${(state.player.yaw || 0).toFixed(2)} / ${(state.player.targetYaw || 0).toFixed(2)}</span></div>
   <div class="shop-item"><span>ForwardOffset/Speed</span><span>${(state.modelForwardOffsetYaw || 0).toFixed(2)} / ${(state.player.speed3D || 0).toFixed(2)}</span></div>`;
@@ -2977,15 +2988,32 @@ async function loadFreeWorldProps() {
     render3d.world.add(mesh);
     render3d.props.push(mesh);
     render3d.gltfStats.fallback += 1;
+    return mesh;
+  };
+
+  const makeFallbackByType = (type, pos) => {
+    const toon = state.renderStyle === 'toon';
+    if (type === 'tree') {
+      addFallbackProp(new THREE.ConeGeometry(0.42, 1.6, 8), toon ? new THREE.MeshToonMaterial({ color: '#5a8f53', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#5a8f53', roughness: 0.9 }), [pos[0], pos[1] + 1.2, pos[2]], 0.1, 1.2);
+      addFallbackProp(new THREE.CylinderGeometry(0.14, 0.2, 1.0, 8), toon ? new THREE.MeshToonMaterial({ color: '#6d4c41', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#6d4c41', roughness: 0.9 }), [pos[0], pos[1] + 0.5, pos[2]], 0.1, 1.2);
+      return;
+    }
+    if (type === 'house') {
+      addFallbackProp(new THREE.BoxGeometry(1.2, 0.8, 0.8), toon ? new THREE.MeshToonMaterial({ color: '#f2c4a6', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#f2c4a6', roughness: 0.72 }), [pos[0], pos[1] + 0.45, pos[2]], 0.4, 1.0);
+      return;
+    }
+    if (type === 'fence') {
+      addFallbackProp(new THREE.CylinderGeometry(0.08, 0.08, 1.4, 6), new THREE.MeshStandardMaterial({ color: '#4b5563', roughness: 0.75 }), [pos[0], pos[1] + 0.7, pos[2]], 0.0, 1.0);
+      return;
+    }
+    addFallbackProp(new THREE.SphereGeometry(0.46, 8, 8), new THREE.MeshStandardMaterial({ color: '#9ca3af', roughness: 0.95 }), [pos[0], pos[1] + 0.4, pos[2]], 0.0, 1.0);
   };
 
   const fallbackPack = () => {
-    const toon = state.renderStyle === 'toon';
-    addFallbackProp(new THREE.ConeGeometry(0.42, 1.6, 8), toon ? new THREE.MeshToonMaterial({ color: '#5a8f53', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#5a8f53', roughness: 0.9 }), [-10, 1.2, -6], 0.1, 1.2);
-    addFallbackProp(new THREE.CylinderGeometry(0.14, 0.2, 1.0, 8), toon ? new THREE.MeshToonMaterial({ color: '#6d4c41', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#6d4c41', roughness: 0.9 }), [-10, 0.5, -6], 0.1, 1.2);
-    addFallbackProp(new THREE.BoxGeometry(1.2, 0.8, 0.8), toon ? new THREE.MeshToonMaterial({ color: '#f2c4a6', gradientMap: render3d.mats?.toonGradient }) : new THREE.MeshStandardMaterial({ color: '#f2c4a6', roughness: 0.72 }), [10, 0.45, -7], 0.4, 1.0);
-    addFallbackProp(new THREE.CylinderGeometry(0.08, 0.08, 1.4, 6), new THREE.MeshStandardMaterial({ color: '#4b5563', roughness: 0.75 }), [4, 0.7, -9], 0.0, 1.0);
-    addFallbackProp(new THREE.SphereGeometry(0.46, 8, 8), new THREE.MeshStandardMaterial({ color: '#9ca3af', roughness: 0.95 }), [5, 0.4, -9], 0.0, 1.0);
+    makeFallbackByType('tree', [-10, 0, -6]);
+    makeFallbackByType('house', [10, 0, -7]);
+    makeFallbackByType('fence', [4, 0, -9]);
+    makeFallbackByType('rock', [5, 0, -9]);
   };
 
   const picks = { tree: null, house: null };
@@ -3030,10 +3058,11 @@ async function loadFreeWorldProps() {
     } catch {
       render3d.gltfStats.failed += 1;
       markAssetStats('model', false, spec.url);
+      makeFallbackByType(spec.type, spec.pos);
     }
   }
 
-  if (loadedCount === 0) fallbackPack();
+  if (loadedCount === 0 && render3d.gltfStats.fallback === 0) fallbackPack();
 }
 
 
@@ -3997,7 +4026,9 @@ function updateUI() {
     const wd = render3d.waterDebug || {};
     const waterPos = render3d.water?.position ? `${render3d.water.position.x.toFixed(2)},${render3d.water.position.y.toFixed(2)},${render3d.water.position.z.toFixed(2)}` : 'none';
     const camDist = render3d.camera.position.distanceTo(new THREE.Vector3(state.player.x / TILE - MAP_W / 2, 0, state.player.y / TILE - MAP_H / 2));
-    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} d:${camDist.toFixed(2)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | YAW p:${(state.player.yaw||0).toFixed(2)} t:${(state.player.targetYaw||0).toFixed(2)} off:${(state.modelForwardOffsetYaw||0).toFixed(2)} spd:${(state.player.speed3D||0).toFixed(2)} | TXF:${render3d.textureFailureUrls.length} MDF:${render3d.modelFailureUrls.length}`;
+    const txFail = render3d.textureFailureUrls.slice(0, 1).join(',') || '-';
+    const mdFail = render3d.modelFailureUrls.slice(0, 1).join(',') || '-';
+    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} d:${camDist.toFixed(2)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | YAW p:${(state.player.yaw||0).toFixed(2)} t:${(state.player.targetYaw||0).toFixed(2)} off:${(state.modelForwardOffsetYaw||0).toFixed(2)} spd:${(state.player.speed3D||0).toFixed(2)} | TXF:${render3d.textureFailureUrls.length}(${txFail}) MDF:${render3d.modelFailureUrls.length}(${mdFail})`;
     ui.message.textContent = `${ui.message.textContent ? `${ui.message.textContent} | ` : ''}${dbg}`;
   }
 

@@ -94,5 +94,20 @@
       "page": "https://kenney.nl/assets/animated-characters-2",
       "output_dir": "assets/models/kenney/animated-characters-2"
     }
+  ],
+  "model_alias_targets": [
+    {
+      "output": "assets/models/tree.glb",
+      "tags": [
+        "tree"
+      ]
+    },
+    {
+      "output": "assets/models/prop_house.glb",
+      "tags": [
+        "house",
+        "building"
+      ]
+    }
   ]
 }
