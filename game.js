@@ -100,6 +100,7 @@ const CAMPFIRE = { x: 1140, y: 1340 };
 const LOOKOUT = { x: 2060, y: 980 };
 const PIER = { x: (WATER.x1 + 1) * TILE, y: BRIDGE.y * TILE + 60 };
 const WORLD_RADIUS = Math.min(WORLD_W, WORLD_H) * 0.46;
+const MODEL_FORWARD_OFFSET_YAW = 0;
 
 const NPC_HOMES = [
   { id: 'luna', x: 1120, y: 1060, color: '#ef9a6f' },
@@ -173,7 +174,7 @@ const state = {
   coins: 110,
   level: 1,
   xp: 0,
-  player: { x: 960, y: 1120, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false, lastSafeX: 960, lastSafeY: 1120, yaw: 0, targetYaw: 0 },
+  player: { x: 960, y: 1120, speed: 2.4, energy: 100, mood: 100, facing: 'down', pause: false, lastSafeX: 960, lastSafeY: 1120, yaw: 0, targetYaw: 0, speed3D: 0, lastFrameX: 960, lastFrameY: 1120 },
   inv: { wood: 0, flower: 0, berry: 0, shell: 0, fish: 0, bug: 0, seed: 2, furniture: 0 },
   objects: [],
   fishes: [],
@@ -219,6 +220,7 @@ const state = {
   debugPaths: false,
   debugRenderInfo: false,
   renderStyle: 'pbr',
+  modelForwardOffsetYaw: MODEL_FORWARD_OFFSET_YAW,
   paused: false,
   pauseFlags: { overlay: false, modal: false },
   uiStack: [],
@@ -247,6 +249,15 @@ const state = {
 
 function clamp(v, min, max) { return Math.max(min, Math.min(max, v)); }
 function rnd(min, max) { return Math.random() * (max - min) + min; }
+function normalizeAngle(a) {
+  let out = a;
+  while (out > Math.PI) out -= Math.PI * 2;
+  while (out < -Math.PI) out += Math.PI * 2;
+  return out;
+}
+function shortestAngleDiff(from, to) {
+  return normalizeAngle(to - from);
+}
 function dist(a, b) { return worldDistance(a, b); }
 
 const STORAGE_KEYS = {
@@ -946,6 +957,8 @@ function initNPCs() {
     gesture: 'idle',
     gestureTimer: 0,
     lookYaw: 0,
+    targetYaw: 0,
+    modelForwardOffsetYaw: MODEL_FORWARD_OFFSET_YAW,
   }));
 
   state.npcs.forEach((n) => {
@@ -2338,7 +2351,9 @@ function openTownBoard() {
   <div class="shop-item"><span>오늘의 물물교환</span><span>${barters || 'NPC와 대화해 확인'}</span></div>
   <div class="shop-item"><span>평균 FPS</span><span>${(render3d.fpsAvg || 0).toFixed(1)}</span></div>
   <div class="shop-item"><span>드로우콜 / 삼각형</span><span>${drawCalls} / ${tris}</span></div>
-  <div class="shop-item"><span>Water Debug(F3)</span><span>${state.debugRenderInfo ? 'ON' : 'OFF'}</span></div>`;
+  <div class="shop-item"><span>Water Debug(F3)</span><span>${state.debugRenderInfo ? 'ON' : 'OFF'}</span></div>
+  <div class="shop-item"><span>PlayerYaw/Target</span><span>${(state.player.yaw || 0).toFixed(2)} / ${(state.player.targetYaw || 0).toFixed(2)}</span></div>
+  <div class="shop-item"><span>ForwardOffset/Speed</span><span>${(state.modelForwardOffsetYaw || 0).toFixed(2)} / ${(state.player.speed3D || 0).toFixed(2)}</span></div>`;
   openModal('마을 보드', html);
 }
 
@@ -2595,14 +2610,19 @@ function playerMove() {
     }
   }
 
-  if ((dx || dy) && state.renderMode === '3d' && !state.house.inside) {
-    state.player.targetYaw = -Math.atan2(dx, dy);
-    let diff = state.player.targetYaw - state.player.yaw;
-    while (diff > Math.PI) diff -= Math.PI * 2;
-    while (diff < -Math.PI) diff += Math.PI * 2;
-    state.player.yaw += diff * 0.16;
-    if (Math.abs(dx) > Math.abs(dy)) state.player.facing = dx > 0 ? 'right' : 'left';
-    else state.player.facing = dy > 0 ? 'down' : 'up';
+  if (state.renderMode === '3d' && !state.house.inside) {
+    const worldDx = circularDelta(state.player.x, state.player.lastFrameX ?? state.player.x, WORLD_W);
+    const worldDy = circularDelta(state.player.y, state.player.lastFrameY ?? state.player.y, WORLD_H);
+    const moveSpeed = Math.hypot(worldDx, worldDy);
+    state.player.speed3D = moveSpeed;
+    if (moveSpeed > 0.001) {
+      state.player.targetYaw = -Math.atan2(worldDx, worldDy);
+      state.player.yaw = normalizeAngle(state.player.yaw + shortestAngleDiff(state.player.yaw, state.player.targetYaw) * 0.18);
+      if (Math.abs(worldDx) > Math.abs(worldDy)) state.player.facing = worldDx > 0 ? 'right' : 'left';
+      else state.player.facing = worldDy > 0 ? 'down' : 'up';
+    }
+    state.player.lastFrameX = state.player.x;
+    state.player.lastFrameY = state.player.y;
   }
 
   const moving = dx || dy;
@@ -3613,7 +3633,8 @@ function sync3DEntities() {
 
   const p = to3D(state.player.x, state.player.y);
   render3d.player.position.set(p.x, 0.25, p.z);
-  render3d.player.rotation.y = state.renderMode === "3d" ? (state.player.yaw || facingToYaw(state.player.facing)) : facingToYaw(state.player.facing);
+  const playerRenderYaw = state.renderMode === '3d' ? (state.player.yaw || facingToYaw(state.player.facing)) : facingToYaw(state.player.facing);
+  render3d.player.rotation.y = normalizeAngle(playerRenderYaw + (state.modelForwardOffsetYaw || 0));
   animateRigCharacter(render3d.player, state.time * 0.016, input.isDown('moveUp') || input.isDown('moveDown') || input.isDown('moveLeft') || input.isDown('moveRight'));
 
   state.npcs.forEach((npc, i) => {
@@ -3621,13 +3642,16 @@ function sync3DEntities() {
     if (!mesh) return;
     const n = to3D(npc.x, npc.y);
     mesh.position.set(n.x, 0.25, n.z);
-    const nearPlayer = dist(state.player, npc) < 100;
-    const facingYaw = facingToYaw(npc.facing || 'down');
-    const lookYaw = Math.atan2(circularDelta(state.player.x, npc.x, WORLD_W), circularDelta(state.player.y, npc.y, WORLD_H));
-    const targetYaw = nearPlayer ? lookYaw : facingYaw;
-    npc.lookYaw = (npc.lookYaw ?? targetYaw) + (targetYaw - (npc.lookYaw ?? targetYaw)) * 0.14;
-    mesh.rotation.y = npc.lookYaw;
-    const npcMoving = Math.abs(npc.vx || 0) + Math.abs(npc.vy || 0) > 0.05;
+    const moveDx = npc.vx || 0;
+    const moveDy = npc.vy || 0;
+    const npcMoving = Math.hypot(moveDx, moveDy) > 0.05;
+    if (npcMoving) {
+      npc.targetYaw = -Math.atan2(moveDx, moveDy);
+    } else if (npc.targetYaw == null) {
+      npc.targetYaw = facingToYaw(npc.facing || 'down');
+    }
+    npc.lookYaw = normalizeAngle((npc.lookYaw ?? npc.targetYaw) + shortestAngleDiff((npc.lookYaw ?? npc.targetYaw), npc.targetYaw) * 0.14);
+    mesh.rotation.y = normalizeAngle(npc.lookYaw + (npc.modelForwardOffsetYaw ?? state.modelForwardOffsetYaw ?? 0));
     animateRigCharacter(mesh, state.time * 0.016 + i * 0.7, npcMoving);
     const plate = mesh.userData?.nameplate;
     if (plate) {
@@ -3963,7 +3987,7 @@ function updateUI() {
   if (state.debugRenderInfo && render3d.camera) {
     const wd = render3d.waterDebug || {};
     const waterPos = render3d.water?.position ? `${render3d.water.position.x.toFixed(2)},${render3d.water.position.y.toFixed(2)},${render3d.water.position.z.toFixed(2)}` : 'none';
-    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | TXF:${render3d.textureFailureUrls.length} MDF:${render3d.modelFailureUrls.length}`;
+    const dbg = `CAM n:${render3d.camera.near.toFixed(2)} f:${render3d.camera.far.toFixed(0)} | WATER ${wd.exists ? 'on' : 'off'} ${wd.side || ''} tr:${wd.transparent ? '1' : '0'} dw:${wd.depthWrite ? '1' : '0'} ro:${wd.renderOrder ?? 0} fc:${wd.frustumCulled ? '1' : '0'} pos:${waterPos} | YAW p:${(state.player.yaw||0).toFixed(2)} t:${(state.player.targetYaw||0).toFixed(2)} off:${(state.modelForwardOffsetYaw||0).toFixed(2)} spd:${(state.player.speed3D||0).toFixed(2)} | TXF:${render3d.textureFailureUrls.length} MDF:${render3d.modelFailureUrls.length}`;
     ui.message.textContent = `${ui.message.textContent ? `${ui.message.textContent} | ` : ''}${dbg}`;
   }
 
@@ -4130,7 +4154,17 @@ window.addEventListener('keydown', (e) => {
   if (input.consume('openMap')) { openWorldMap(); return; }
   if (input.consume('interact')) { interact(); return; }
   if (input.consume('toggleDebug')) { state.debugPaths = !state.debugPaths; setMsg(`NPC 디버그 ${state.debugPaths ? 'ON' : 'OFF'}`); return; }
-  if (input.consume('toggleDebugInfo')) { state.debugRenderInfo = !state.debugRenderInfo; setMsg(`렌더 디버그 ${state.debugRenderInfo ? 'ON' : 'OFF'}`); return; }
+  if (input.consume('toggleDebugInfo')) {
+    if (e.shiftKey) {
+      state.modelForwardOffsetYaw = Math.abs(Math.abs(state.modelForwardOffsetYaw) - Math.PI) < 0.05 ? MODEL_FORWARD_OFFSET_YAW : Math.PI;
+      state.npcs.forEach((n) => { n.modelForwardOffsetYaw = state.modelForwardOffsetYaw; });
+      setMsg(`모델 Forward Offset ${state.modelForwardOffsetYaw.toFixed(2)} (Shift+F3)`);
+    } else {
+      state.debugRenderInfo = !state.debugRenderInfo;
+      setMsg(`렌더 디버그 ${state.debugRenderInfo ? 'ON' : 'OFF'}`);
+    }
+    return;
+  }
   if (input.consume('toggle3D')) { toggleRenderMode(); return; }
   if (input.consume('toggleStyle')) { toggleRenderStyle(); return; }
 
