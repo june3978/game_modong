@@ -35,38 +35,62 @@
       <div id="dialogueUi" class="dialogue-ui hidden"></div>
     </section>
 
-    <aside class="side-hud panel">
-      <h2>🎒 인벤토리</h2>
-      <div id="inventory" class="inventory"></div>
+    <aside class="side-hud panel" id="sideHud">
+      <div class="side-tabs" id="sideTabs" role="tablist">
+        <button class="tab-btn active" data-tab="inventoryTab">1 인벤</button>
+        <button class="tab-btn" data-tab="questTab">2 목표</button>
+        <button class="tab-btn" data-tab="relationsTab">3 관계</button>
+        <button class="tab-btn" data-tab="achievementsTab">4 업적</button>
+        <button class="tab-btn" data-tab="logTab">5 로그</button>
+        <button class="tab-btn" data-tab="miniMapTab">6 미니맵</button>
+        <button class="tab-btn" data-tab="controlsTab">7 조작</button>
+      </div>
 
-      <h2>📌 목표</h2>
-      <div id="quest" class="quest"></div>
+      <section class="tab-panel active" id="inventoryTab">
+        <h2>🎒 인벤토리</h2>
+        <div id="inventory" class="inventory"></div>
+      </section>
 
-      <h2>🤝 주민 관계</h2>
-      <div id="relations" class="quest"></div>
+      <section class="tab-panel" id="questTab">
+        <h2>📌 목표</h2>
+        <div id="quest" class="quest"></div>
+      </section>
 
-      <h2>🏆 업적</h2>
-      <div id="achievements" class="quest"></div>
+      <section class="tab-panel" id="relationsTab">
+        <h2>🤝 주민 관계</h2>
+        <div id="relations" class="quest"></div>
+      </section>
 
-      <h2>🧾 진행 로그</h2>
-      <div id="log" class="quest"></div>
+      <section class="tab-panel" id="achievementsTab">
+        <h2>🏆 업적</h2>
+        <div id="achievements" class="quest"></div>
+      </section>
 
-      <h2>🗺️ 미니맵</h2>
-      <div id="worldMapMini" class="quest map-mini"></div>
+      <section class="tab-panel" id="logTab">
+        <h2>🧾 진행 로그</h2>
+        <div id="log" class="quest"></div>
+      </section>
 
-      <h2>🧭 조작</h2>
-      <ul class="controls">
-        <li>이동: WASD / 방향키</li>
-        <li>상호작용: E</li>
-        <li>낚시/타이밍: Space</li>
-        <li>달리기: Shift</li>
-        <li>인테리어 배치: F</li>
-        <li>가구 편집: I/J/K/L 이동, T 회전, Tab 전환</li>
-        <li>농사 심기/수확: R</li>
-        <li>곤충 채집: G</li>
-        <li>3D 카메라: Q/C 회전, Z/X 줌</li>
-        <li>월드 지도: M 또는 상단 지도 버튼</li>
-      </ul>
+      <section class="tab-panel" id="miniMapTab">
+        <h2>🗺️ 미니맵</h2>
+        <div id="worldMapMini" class="quest map-mini"></div>
+      </section>
+
+      <section class="tab-panel" id="controlsTab">
+        <h2>🧭 조작</h2>
+        <ul class="controls">
+          <li>이동: WASD / 방향키</li>
+          <li>상호작용: E</li>
+          <li>낚시/타이밍: Space</li>
+          <li>달리기: Shift</li>
+          <li>인테리어 배치: F</li>
+          <li>가구 편집: I/J/K/L 이동, T 회전, Tab 전환</li>
+          <li>농사 심기/수확: R</li>
+          <li>곤충 채집: G</li>
+          <li>3D 카메라: Q/C 회전, Z/X 줌</li>
+          <li>월드 지도: M 또는 상단 지도 버튼</li>
+        </ul>
+      </section>
     </aside>
   </main>
 

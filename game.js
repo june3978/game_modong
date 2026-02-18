@@ -8,6 +8,8 @@ import { UnrealBloomPass } from 'three/addons/postprocessing/UnrealBloomPass.js'
 const canvas = document.getElementById('game');
 const ctx = canvas.getContext('2d');
 ctx.imageSmoothingEnabled = false;
+const BASE_CANVAS_W = 1280;
+const BASE_CANVAS_H = 720;
 
 const SPRITE_CELL = 16;
 const SPRITE_SCALE = 3;
@@ -71,6 +73,9 @@ const ui = {
   btnStyle: document.getElementById('btnStyle'),
   overlayRoot: document.getElementById('overlayRoot'),
   sideHud: document.querySelector('.side-hud'),
+  sideTabs: document.getElementById('sideTabs'),
+  tabButtons: Array.from(document.querySelectorAll('.tab-btn')),
+  tabPanels: Array.from(document.querySelectorAll('.tab-panel')),
 };
 
 const TILE = 48;
@@ -217,6 +222,7 @@ const state = {
   paused: false,
   pauseFlags: { overlay: false, modal: false },
   uiStack: [],
+  activeSideTab: 'inventoryTab',
   uiDirty: true,
   lastUiUpdate: 0,
   lastMiniMapUpdate: 0,
@@ -233,6 +239,9 @@ const state = {
     autoOptimize: true,
     npcNameplates: true,
     mouseSensitivity: 1,
+    uiScale: 1,
+    renderScale2D: 1,
+    hudDensity: 'normal',
   },
 };
 
@@ -303,6 +312,38 @@ function friendlyCodeLabel(code) {
   return code;
 }
 
+
+function applyUiScale() {
+  const scale = clamp(state.settings.uiScale || 1, 0.75, 1.25);
+  document.documentElement.style.setProperty('--ui-scale', String(scale));
+}
+
+function applyHudDensity() {
+  const density = state.settings.hudDensity === 'compact' ? 'compact' : 'normal';
+  document.body.dataset.density = density;
+}
+
+function apply2DRenderScale() {
+  const s = clamp(state.settings.renderScale2D || 1, 0.5, 1);
+  canvas.width = Math.round(BASE_CANVAS_W * s);
+  canvas.height = Math.round(BASE_CANVAS_H * s);
+}
+
+function setActiveSideTab(tabId) {
+  if (!tabId) return;
+  state.activeSideTab = tabId;
+  ui.tabButtons.forEach((btn) => btn.classList.toggle('active', btn.dataset.tab === tabId));
+  ui.tabPanels.forEach((panel) => panel.classList.toggle('active', panel.id === tabId));
+}
+
+function cycleSideTab(step = 1) {
+  const tabs = ui.tabButtons.map((b) => b.dataset.tab).filter(Boolean);
+  if (!tabs.length) return;
+  const cur = tabs.indexOf(state.activeSideTab);
+  const next = tabs[(cur + step + tabs.length) % tabs.length];
+  setActiveSideTab(next);
+}
+
 function loadPreferences() {
   try {
     const rawS = localStorage.getItem(STORAGE_KEYS.settings);
@@ -312,6 +353,9 @@ function loadPreferences() {
     const rawB = localStorage.getItem(STORAGE_KEYS.keybindings);
     if (rawB) input.bindings = { ...input.bindings, ...JSON.parse(rawB) };
   } catch {}
+  applyUiScale();
+  applyHudDensity();
+  apply2DRenderScale();
 }
 
 function persistPreferences() {
@@ -2131,6 +2175,10 @@ function pushScreen(name, payload = {}) {
       <div class="overlay-row"><span>자동 최적화</span><button data-ui="toggleAutoOpt">${state.settings.autoOptimize ? 'ON' : 'OFF'}</button></div>
       <div class="overlay-row"><span>마우스 감도</span><button data-ui="mouseDown">-</button><span>${state.settings.mouseSensitivity.toFixed(1)}</span><button data-ui="mouseUp">+</button></div>
       <div class="overlay-row"><span>NPC 이름표</span><button data-ui="toggleNameplate">${state.settings.npcNameplates ? 'ON' : 'OFF'}</button></div>
+      <div class="overlay-row"><span>UI Scale</span><button data-ui="uiScaleDown">-</button><span>${(state.settings.uiScale || 1).toFixed(2)}</span><button data-ui="uiScaleUp">+</button></div>
+      <div class="overlay-row"><span>2D Render Scale</span><button data-ui="rs2dDown">-</button><span>${(state.settings.renderScale2D || 1).toFixed(2)}</span><button data-ui="rs2dUp">+</button></div>
+      <div class="overlay-row"><span>3D Render Scale</span><button data-ui="rs3dDown">-</button><span>${(state.settings.pixelRatioCap || 1).toFixed(2)}</span><button data-ui="rs3dUp">+</button></div>
+      <div class="overlay-row"><span>HUD Density</span><button data-ui="toggleHudDensity">${state.settings.hudDensity === 'compact' ? 'Compact' : 'Normal'}</button></div>
       <div class="overlay-actions"><button data-ui="back" class="secondary">뒤로</button></div>` }),
     graphics: () => ({ title: '🖥️ 그래픽', html: `
       <div class="overlay-actions">
@@ -2195,6 +2243,13 @@ function handleOverlayAction(action, btn) {
   if (action === 'mouseUp') { state.settings.mouseSensitivity = clamp(state.settings.mouseSensitivity + 0.1, 0.3, 2.4); persistPreferences(); return replaceScreen('settings'); }
   if (action === 'mouseDown') { state.settings.mouseSensitivity = clamp(state.settings.mouseSensitivity - 0.1, 0.3, 2.4); persistPreferences(); return replaceScreen('settings'); }
   if (action === 'toggleNameplate') { state.settings.npcNameplates = !state.settings.npcNameplates; persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'uiScaleUp') { state.settings.uiScale = clamp((state.settings.uiScale || 1) + 0.05, 0.75, 1.25); applyUiScale(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'uiScaleDown') { state.settings.uiScale = clamp((state.settings.uiScale || 1) - 0.05, 0.75, 1.25); applyUiScale(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'rs2dUp') { state.settings.renderScale2D = clamp((state.settings.renderScale2D || 1) + 0.05, 0.5, 1.0); apply2DRenderScale(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'rs2dDown') { state.settings.renderScale2D = clamp((state.settings.renderScale2D || 1) - 0.05, 0.5, 1.0); apply2DRenderScale(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'rs3dUp') { state.settings.pixelRatioCap = clamp((state.settings.pixelRatioCap || 1) + 0.05, 0.75, 2.0); applyGraphicsSettings(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'rs3dDown') { state.settings.pixelRatioCap = clamp((state.settings.pixelRatioCap || 1) - 0.05, 0.75, 2.0); applyGraphicsSettings(); persistPreferences(); return replaceScreen('settings'); }
+  if (action === 'toggleHudDensity') { state.settings.hudDensity = state.settings.hudDensity === 'compact' ? 'normal' : 'compact'; applyHudDensity(); persistPreferences(); return replaceScreen('settings'); }
   if (action === 'preset') { applyGraphicsPreset(btn.dataset.preset || 'medium'); return replaceScreen('graphics'); }
   if (action === 'resetBinds') { input.bindings = JSON.parse(JSON.stringify(DEFAULT_BINDINGS)); persistPreferences(); return replaceScreen('keybinds'); }
   if (action === 'rebind') {
@@ -3816,6 +3871,8 @@ function syncRenderSurface() {
   const enable3D = state.renderMode === '3d' && !state.house.inside;
   canvas.classList.toggle('hidden', enable3D);
   ui.game3d.classList.toggle('hidden', !enable3D);
+  ui.dialogueUi.style.zIndex = '45';
+  ui.overlayRoot.style.zIndex = '70';
 }
 
 function renderMiniMapHtml(size = 180) {
@@ -4037,6 +4094,15 @@ window.addEventListener('keydown', (e) => {
   }
   if (isOverlayOpen() || isModalOpen()) return;
 
+  if (!state.dialogue) {
+    if (e.ctrlKey && code === 'Tab') { e.preventDefault(); cycleSideTab(1); return; }
+    if (!e.ctrlKey && /^Digit[1-7]$/.test(code)) {
+      const idx = Number(code.slice(5)) - 1;
+      const tab = ui.tabButtons[idx]?.dataset.tab;
+      if (tab) { setActiveSideTab(tab); return; }
+    }
+  }
+
   if (state.dialogue) {
     if (code === 'Digit1') return handleDialogueChoice(1);
     if (code === 'Digit2') return handleDialogueChoice(2);
@@ -4087,6 +4153,12 @@ ui.btnMap?.addEventListener('click', openWorldMap);
 ui.btnStyle?.addEventListener('click', toggleRenderStyle);
 if (ui.btnStyle) ui.btnStyle.textContent = '🎨 동숲 스타일';
 updateActionLabels();
+ui.sideTabs?.addEventListener('click', (e) => {
+  const btn = e.target.closest('.tab-btn');
+  if (!btn) return;
+  setActiveSideTab(btn.dataset.tab);
+});
+setActiveSideTab(state.activeSideTab);
 ui.modalClose.addEventListener('click', closeModal);
 ui.modal.addEventListener('click', (e) => { if (e.target === ui.modal) closeModal(); });
 ui.dialogueUi.addEventListener('click', (e) => {
@@ -4119,8 +4191,8 @@ updateUI();
 tick();
 
 const GRAPHICS_PRESETS = {
-  low: { pixelRatioCap: 1.0, shadows: false, shadowMapSize: 1024, postFX: false, treeCount: 50, rainCount: 260 },
-  medium: { pixelRatioCap: 1.25, shadows: true, shadowMapSize: 1024, postFX: false, treeCount: 90, rainCount: 700 },
+  low: { pixelRatioCap: 0.75, shadows: false, shadowMapSize: 1024, postFX: false, treeCount: 50, rainCount: 260 },
+  medium: { pixelRatioCap: 1.0, shadows: true, shadowMapSize: 1024, postFX: false, treeCount: 90, rainCount: 700 },
   high: { pixelRatioCap: 2.0, shadows: true, shadowMapSize: 4096, postFX: true, treeCount: 180, rainCount: 1200 },
   ultra: { pixelRatioCap: 2.0, shadows: true, shadowMapSize: 4096, postFX: true, treeCount: 220, rainCount: 1600 },
 };
