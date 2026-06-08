@@ -1,3 +1,4 @@
+<<<<<<< codex/create-2d-healing-game-like-animal-crossing
 # 힐링 포레스트: 아일랜드 라이프
 
 현재 버전은 **v2.2** 입니다.
@@ -237,3 +238,6 @@ python3 scripts/download_assets.py --force
 - NPC별 `npcMemories`에 최근 대화 주제/플레이어 반응을 저장해 다음 만남의 첫 대사와 분기 선택에 반영됩니다.
 - `요청/교환/선물` 루프는 유지하면서 대화형 플로우 안으로 통합했습니다.
 - 키 입력도 `1~4` 선택을 지원하며, ESC(일시정지 바인딩)로 대화 종료가 가능합니다.
+=======
+
+>>>>>>> main
