@@ -1,0 +1,118 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>힐링 포레스트: 아일랜드 라이프</title>
+  <link rel="stylesheet" href="styles.css" />
+  <link rel="preload" as="image" href="assets/tiles.png" />
+  <link rel="preload" as="image" href="assets/characters.png" />
+  <link rel="preload" as="image" href="assets/items.png" />
+</head>
+<body>
+  <main class="game-shell">
+    <header class="top-hud panel">
+      <div class="brand">🌿 힐링 포레스트: 아일랜드 라이프</div>
+      <div class="stats" id="statsBar"></div>
+      <div class="actions">
+        <button id="btnMenu">☰ 메뉴</button>
+        <button id="btnRender">🧊 3D뷰</button>
+        <button id="btnCraft">🔨 제작</button>
+        <button id="btnShop">🛒 상점</button>
+        <button id="btnBuild">🏗️ 건축</button>
+        <button id="btnTown">📜 마을보드</button>
+        <button id="btnMuseum">🏛️ 박물관</button>
+        <button id="btnMap">🗺️ 지도</button>
+        <button id="btnStyle">🎨 동숲 스타일</button>
+      </div>
+    </header>
+
+    <section class="canvas-wrap panel">
+      <canvas id="game" width="1280" height="720" aria-label="2D 힐링 시뮬레이션"></canvas>
+      <div id="game3d" class="game3d hidden" aria-label="3D 힐링 시뮬레이션"></div>
+      <div id="fishingUi" class="fishing-ui hidden"></div>
+      <div id="message" class="message"></div>
+      <div id="dialogueUi" class="dialogue-ui hidden"></div>
+    </section>
+
+    <aside class="side-hud panel" id="sideHud">
+      <div class="side-tabs" id="sideTabs" role="tablist">
+        <button class="tab-btn active" data-tab="inventoryTab">1 인벤</button>
+        <button class="tab-btn" data-tab="questTab">2 목표</button>
+        <button class="tab-btn" data-tab="relationsTab">3 관계</button>
+        <button class="tab-btn" data-tab="achievementsTab">4 업적</button>
+        <button class="tab-btn" data-tab="logTab">5 로그</button>
+        <button class="tab-btn" data-tab="miniMapTab">6 미니맵</button>
+        <button class="tab-btn" data-tab="controlsTab">7 조작</button>
+      </div>
+
+      <section class="tab-panel active" id="inventoryTab">
+        <h2>🎒 인벤토리</h2>
+        <div id="inventory" class="inventory"></div>
+      </section>
+
+      <section class="tab-panel" id="questTab">
+        <h2>📌 목표</h2>
+        <div id="quest" class="quest"></div>
+      </section>
+
+      <section class="tab-panel" id="relationsTab">
+        <h2>🤝 주민 관계</h2>
+        <div id="relations" class="quest"></div>
+      </section>
+
+      <section class="tab-panel" id="achievementsTab">
+        <h2>🏆 업적</h2>
+        <div id="achievements" class="quest"></div>
+      </section>
+
+      <section class="tab-panel" id="logTab">
+        <h2>🧾 진행 로그</h2>
+        <div id="log" class="quest"></div>
+      </section>
+
+      <section class="tab-panel" id="miniMapTab">
+        <h2>🗺️ 미니맵</h2>
+        <div id="worldMapMini" class="quest map-mini"></div>
+      </section>
+
+      <section class="tab-panel" id="controlsTab">
+        <h2>🧭 조작</h2>
+        <ul class="controls">
+          <li>이동: WASD / 방향키</li>
+          <li>상호작용: E</li>
+          <li>낚시/타이밍: Space</li>
+          <li>달리기: Shift</li>
+          <li>인테리어 배치: F</li>
+          <li>가구 편집: I/J/K/L 이동, T 회전, Tab 전환</li>
+          <li>농사 심기/수확: R</li>
+          <li>곤충 채집: G</li>
+          <li>3D 카메라: Q/C 회전, Z/X 줌</li>
+          <li>월드 지도: M 또는 상단 지도 버튼</li>
+        </ul>
+      </section>
+    </aside>
+  </main>
+
+
+  <div id="overlayRoot" class="overlay-root hidden" aria-live="polite"></div>
+
+  <div id="modal" class="modal hidden">
+    <div class="modal-card panel">
+      <h3 id="modalTitle"></h3>
+      <div id="modalBody"></div>
+      <button id="modalClose">닫기</button>
+    </div>
+  </div>
+
+  <script type="importmap">
+    {
+      "imports": {
+        "three": "https://unpkg.com/three@0.160.0/build/three.module.js",
+        "three/addons/": "https://unpkg.com/three@0.160.0/examples/jsm/"
+      }
+    }
+  </script>
+  <script type="module" src="game.js"></script>
+</body>
+</html>

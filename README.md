@@ -1,1 +1,243 @@
+<<<<<<< codex/create-2d-healing-game-like-animal-crossing
+# 힐링 포레스트: 아일랜드 라이프
 
+현재 버전은 **v2.2** 입니다.
+
+## 그래픽 개선 20가지
+
+1. PolyHaven 우선 텍스처 로딩 체인
+2. 텍스처 백업 폴백 체인
+3. 텍스처 성공/실패 진단 카운트
+4. PBR 알베도/노멀/러프니스 맵 구성
+5. `normalScale` 세부 튜닝
+6. `envMapIntensity` 세부 튜닝
+7. ACES Filmic tone mapping
+8. 물리 기반 조명(`physicallyCorrectLights`)
+9. VSM ShadowMap 적용
+10. 4K 그림자 맵 해상도
+11. 그림자 bias/normalBias 튜닝
+12. 픽셀 비율 상향(`setPixelRatio`)
+13. 날씨 기반 안개 색/거리 동기화
+14. 비 파티클 렌더링
+15. 하늘 돔 배경
+16. 건물 접지 그림자(컨택트형)
+17. 유리 창문 물리 머티리얼
+18. 건물 디테일(문/손잡이/굴뚝/트림)
+19. POI 이펙트 오브젝트(회전+발광)
+20. 3D 대화 오버레이 UI 시각 통합
+
+## 상점/상호작용 기타 20가지
+
+1. 집 건축권
+2. 집 업그레이드
+3. 기본 씨앗 패키지
+4. 프리미엄 씨앗 패키지
+5. 기본 가구 구매
+6. 디럭스 가구 구매
+7. 미끼 박스(낚시 버프)
+8. 채집 장갑(곤충 버프)
+9. 수확 비료(농사 버프)
+10. 에너지 드링크
+11. 무드 허브티
+12. 주민 요청 리롤권
+13. 퀘스트 리롤권
+14. 할인 스탬프
+15. 날씨 부적(맑음)
+16. 날씨 부적(비)
+17. 박물관 패스 보너스
+18. 다리 보수 키트
+19. 물고기 일괄 판매
+20. 곤충 일괄 판매
+
+추가 상호작용 포인트(월드 인터랙션): 분수 축복, 모닥불 휴식, 전망대 탐색, 피어 낚시 버프.
+
+## 핵심 문제 해결
+
+- NPC 물 진입/고립 문제 보정 (비마루 주민 물 진입 방지 + 자동 복귀)
+- shell 스폰을 물 내부에서 해안가 접근 가능 지점으로 변경
+- shell 픽업 반경 확대
+- 깊은 물/비정상 진입 시 마지막 안전 좌표 복귀
+- 3D 대화창 선택 버튼 클릭 인터랙션 지원
+
+## 조작
+
+- 이동: `WASD` / 방향키 (3D 모드에서는 카메라 시점 기준)
+- 달리기: `Shift`
+- 상호작용: `E`
+- 낚시/타이밍: `Space`
+- 인테리어 배치: `F`
+- 가구 편집: `I/J/K/L`, `T`, `Tab`
+- 농사 심기/수확: `R`
+- 곤충 채집: `G`
+- 대화 선택: `1` / `2`, 종료: `Esc` (3D에서는 대화창 버튼 클릭 가능)
+- 렌더 전환: 상단 `3D뷰` 버튼
+- 3D 카메라: `Q/C` 회전, `Z/X` 줌
+- 월드 지도: `M` 또는 상단 지도 버튼
+
+## 실행
+
+```bash
+python3 -m http.server 8000
+```
+
+브라우저에서 `http://localhost:8000` 접속.
+
+
+## v2.1 월드 확장 업데이트
+
+- 월드를 **96x96 대형 맵**으로 확장했습니다.
+- 플레이어/카메라 좌표를 **토러스(순환형) 월드**로 바꿔 가장자리가 없고 계속 이어집니다.
+- 2D 화면에 둥근 비네팅을 적용해 행성형(둥근) 월드 감각을 강화했습니다.
+- 주민 주택 단지를 추가해 NPC가 각각 자기 집 주변에서 생활합니다.
+- 신규 주민 슬롯을 포함해 기본 주민 수를 6명으로 확장했습니다.
+- 상단 `지도` 버튼 + `M` 키로 열 수 있는 **월드 지도 시스템**을 추가했습니다.
+- 우측 HUD에 **미니맵**을 추가해 현재 위치와 NPC/주택 분포를 실시간 표시합니다.
+- 3D 월드 지형에 곡률을 적용해 평면 느낌을 줄였습니다.
+
+
+## v2.2 대화/교환 업데이트
+
+- NPC 대화 상호작용 선택 불가 버그를 수정했습니다. (이제 2D/3D 모두 `1`, `2`, `Esc` 입력과 버튼 클릭이 정상 동작)
+- 주민별로 조합형 대사 풀을 도입해 **NPC당 200개+**, 전체 **100개 이상 대화 바리에이션**이 순환되도록 확장했습니다.
+- 대화 2번 선택지에 `요청 제출 → 물물교환 → 선물` 우선순위를 넣어 수집 재료 활용 루프를 강화했습니다.
+- 일일 물물교환 오퍼를 추가하고, 마을 보드에서 오늘의 교환 정보를 확인할 수 있습니다.
+
+
+## v2.5 스프라이트 렌더(2D) 가이드
+
+- 2D 렌더는 이제 `assets/tiles.png`, `assets/characters.png`, `assets/items.png` 스프라이트 아틀라스를 우선 사용합니다.
+- PNG가 없거나 로드 실패하면 기존 `fillRect`/이모지 렌더링으로 자동 폴백됩니다.
+- 외부 번들러 없이 순수 브라우저 로딩(`new Image()`)만 사용합니다.
+- 픽셀아트 선명도를 위해 `ctx.imageSmoothingEnabled = false`를 적용했습니다.
+- 권장 기본 셀 크기: **16x16 px** (`SPRITE_CELL = 16`).
+- 타일 시트(`tiles.png`) 배치: 1행 기준 `water, grass, grove, meadow` 순서(좌→우).
+- 캐릭터 시트(`characters.png`) 배치:
+  - 행(row): `down(0), left(1), right(2), up(3)`
+  - 열(col): 캐릭터당 4프레임 걷기 (`0~3 player`, `4~7 luna`, `8~11 bomi`, `12~15 maru`, ...)
+- 아이템 시트(`items.png`) 배치: 1행 기준 `wood, flower, berry, shell, fish, bug, seed, furniture`.
+- 게임 내 표시 스케일은 캐릭터 기준 약 3배(`SPRITE_SCALE = 3`)이며 타일은 기존 TILE 크기에 맞춰 확대됩니다.
+- 스프라이트 미제공 상태에서도 게임플레이(낚시/농사/상점/퀘스트/저장/3D모드)는 유지됩니다.
+
+## 텍스처 생성 방법 (외부 이미지 없이)
+
+`tools/texture_gen.html`을 브라우저에서 열면 동숲풍 기본 텍스처를 Canvas 2D로 자동 생성합니다.
+
+- 생성 대상: `grass_color`, `dirt_color`, `wood_color`, `roof_color`, `water_normal`, `toon_ramp`
+- 각 카드에서 **PNG 다운로드**로 개별 파일 저장 가능
+- Chromium 계열처럼 File System Access API를 지원하면 **assets/로 저장** 버튼으로
+  `assets/stylized/*.png`에 바로 저장 가능
+- 텍스처는 주기함수 기반 노이즈를 사용해서 가장자리 이음새가 자연스럽게 반복(tileable)됩니다.
+- 게임은 `createWorldMaterials()`에서 `assets/stylized/*`를 **최우선**으로 로드하고,
+  파일이 없으면 기존 원격 텍스처 체인/절차적 폴백으로 자동 전환됩니다.
+
+## v2.9 UI/입력/성능 개편 (PC UX)
+
+### 현황 감사(Audit) 요약
+- 주요 DOM: 상단 액션 버튼(`btnMenu`, `btnRender`, `btnCraft`, `btnShop`, `btnBuild`, `btnTown`, `btnMuseum`, `btnMap`, `btnStyle`),
+  캔버스(`game`), 3D 루트(`game3d`), 대화 UI(`dialogueUi`), 메시지(`message`), 모달(`modal`), 오버레이 루트(`overlayRoot`).
+- 입력 액션: 이동/달리기/상호작용/낚시/지도/3D 토글/스타일 토글/카메라 회전/카메라 줌/디버그/일시정지.
+- 렌더 비용 포인트: shadow map 크기, postFX bloom, pixel ratio, tree/rain 인스턴스 밀도, 매 프레임 DOM 업데이트.
+
+### 구현된 개선
+- ESC 일시정지 메뉴 + 스택형 오버레이 화면(`pause/settings/keybinds/graphics`) 추가.
+- 액션 매핑 기반 입력 시스템 + 키 리바인딩(키1/키2) + localStorage 저장(`keybindings_v1`).
+- 설정 저장(`settings_v1`): 그래픽 프리셋, 자동 최적화, 마우스 감도.
+- 3D 카메라 마우스 조작: 우클릭/중클릭 드래그 회전, 휠 줌.
+- 3D 플레이어 회전: 360도 yaw 스무딩(4방향 스냅 제거).
+- 3D 성능: 기본 MEDIUM 프리셋, 자동 최적화(FPS 저하시 postFX/그림자/픽셀비율 단계적 하향).
+- UI 성능: updateUI/미니맵 갱신 스로틀로 DOM 부하 완화.
+- 조작 도움말/인벤토리 툴팁을 현재 바인딩/상태 기반으로 자동 렌더.
+
+## CC0 에셋 다운로드 파이프라인
+
+브라우저 런타임에서 zip 해제/파일 저장이 어려우므로, 로컬 스크립트로 에셋을 받아서 `assets/`에 배치합니다.
+
+```bash
+python3 scripts/download_assets.py
+```
+
+- 매니페스트: `scripts/assets_manifest.json`
+- 기본 포함: Poly Haven(CC0) 텍스처/HDRI 샘플
+- Kenney/Quaternius(CC0): zip 직링크를 manifest에 채운 뒤 동일 스크립트로 추출
+- 에셋이 없어도 게임은 procedural/fallback으로 플레이 가능
+
+
+### GitHub Pages 배포 시 모델 로딩 방법(선택지 B 권장)
+
+대용량 바이너리를 레포에 직접 커밋하지 않으려면 **GitHub Releases + jsDelivr CDN** 방식을 사용하세요.
+
+1. 로컬에서 `python3 scripts/download_assets.py`를 1회 실행해 `assets/models`를 채웁니다.
+2. 필요한 `*.glb` 파일만 릴리즈 아티팩트로 업로드합니다.
+3. `assets/models/index.json`의 `path`를 jsDelivr 고정 URL(태그 기준)로 교체하면 Pages에서도 동일 로더로 동작합니다.
+4. CORS/URL 실패 시 게임은 기존 procedural fallback으로 자동 진행됩니다.
+
+## 수동 테스트 절차 (체크리스트)
+
+1. 게임 실행 후 `Esc` → 일시정지 메뉴 표시/`계속`으로 복귀 확인.
+2. `설정`에서 자동 최적화/감도 변경 후 새로고침해 값 유지 확인.
+3. `키 설정`에서 상호작용 키 변경 후 새 키로 `E` 대체 동작 확인.
+4. 3D 진입 후 마우스 드래그 회전/휠 줌 동작 확인.
+5. 3D 이동 시 플레이어가 360도 자연 회전하는지 확인.
+6. 그래픽 화면에서 LOW/MEDIUM/HIGH 전환 시 그림자/성능 체감 변화 확인.
+7. 기존 기능(상점/제작/건축/박물관/지도/미니맵/대화/저장/불러오기) 회귀 확인.
+
+### v2.9.1 UX 룰 정리(추가)
+- ESC(`pauseMenu` 바인딩) 우선순위: **대화 닫기 → 모달 닫기 → 오버레이 뒤로가기 → 일시정지 메뉴 열기**.
+- 상점/박물관/지도 버튼 라벨과 월드 프롬프트는 현재 리바인딩 키를 자동 반영합니다.
+- 3D 카메라는 우클릭/중클릭 드래그 회전 + 휠 줌이며, 민감도는 설정 화면에서 조정됩니다.
+
+## v2.10 에셋 파이프라인/3D 안정화 핫픽스
+
+- `scripts/assets_manifest.json`을 CC0 중심으로 확장해 Poly Haven 텍스처/HDRI + Kenney 페이지(자연/캐릭터) 기반 다운로드를 선언형으로 관리합니다.
+- `scripts/download_assets.py`는 Kenney 페이지 HTML에서 zip 링크를 탐색하고(glb 우선), 압축 해제 후 `assets/models/kenney/*`로 정리합니다.
+- 다운로드 로그에 텍스처/모델 성공 수와 실패 URL 목록이 출력됩니다.
+- 3D 모델/텍스처 실패 URL은 런타임에서 `TX/MD` 카운트와 함께 디버그(F3)로 확인 가능합니다.
+- 수면 머티리얼을 안정 조합(DoubleSide, depth 처리, renderOrder, frustumCulled=false)으로 고정해 근거리에서 사라지던 현상을 줄였습니다.
+- NPC 6명은 외형 프로필(팔레트/체형/액세서리: 모자·안경·헤드셋·백팩)과 이름표 옵션으로 식별성을 강화했습니다.
+- 그래픽 설정에 `NPC 이름표` 토글을 추가했습니다.
+
+### 에셋 다운로드 (권장)
+
+```bash
+python3 scripts/download_assets.py
+```
+
+실패 항목이 있더라도 게임은 절차적 fallback 렌더로 계속 플레이할 수 있습니다.
+
+### 렌더 디버그(F3)
+
+- 카메라 near/far
+- 수면 material 플래그(transparent/depthWrite/side/renderOrder/frustumCulled)
+- 수면 월드 좌표
+- 텍스처/모델 실패 개수
+
+
+## v2.11 모델/텍스처 파이프라인 + 3D 안정화 확장
+
+- `scripts/assets_manifest.json`의 `archives`에 Kenney CC0 ZIP 실 URL을 추가했습니다.
+- `scripts/download_assets.py`는 이제 `--force`, `--only textures|models|all` 플래그를 지원합니다.
+- 모델 다운로드 후 `assets/models/index.json`을 자동 생성하고, 태그(tree/house/character/furniture/rock 등)를 휴리스틱 분류합니다.
+- 대표 모델 별칭(`assets/models/tree.glb`, `assets/models/prop_house.glb`, `assets/models/npc/npc_0..5.glb`)을 자동 매핑/복사합니다.
+- 3D 런타임은 `assets/models/index.json`이 있으면 우선 참조해 glTF 로드를 시도하고, 실패 시 기존 별칭/폴백 순으로 진행합니다.
+- Town Board에 glTF 성공/실패/폴백 수와 FPS/드로우콜/삼각형 수를 표시합니다.
+- 텍스처 로더는 `kind=color|normal|roughness|data`에 따라 colorSpace를 분리해 노멀/러프니스 왜곡을 줄였습니다.
+- 물 머티리얼은 `depthWrite=false`, renderOrder/polygonOffset/foam depth 설정으로 근접 소실 현상을 완화했습니다.
+
+### 에셋 다운로드 예시
+
+```bash
+python3 scripts/download_assets.py --only models
+python3 scripts/download_assets.py --only textures
+python3 scripts/download_assets.py --force
+```
+
+## v2.12 NPC 문답/기억형 대화 시스템
+
+- NPC 대화를 2지선다에서 **최대 4선택지 문답**으로 확장했습니다.
+- 대화는 한 번 선택으로 끝나지 않고, 질문→반응→후속 질문으로 이어지는 멀티턴 흐름을 제공합니다.
+- NPC별 `npcMemories`에 최근 대화 주제/플레이어 반응을 저장해 다음 만남의 첫 대사와 분기 선택에 반영됩니다.
+- `요청/교환/선물` 루프는 유지하면서 대화형 플로우 안으로 통합했습니다.
+- 키 입력도 `1~4` 선택을 지원하며, ESC(일시정지 바인딩)로 대화 종료가 가능합니다.
+=======
+
+>>>>>>> main
